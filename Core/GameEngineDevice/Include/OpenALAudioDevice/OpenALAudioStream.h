@@ -21,7 +21,7 @@
 // Author: Stephan Vedder, March 2025
 #pragma once
 
-#include "always.h"
+#include "WWLib/always.h"
 #include <AL/al.h>
 #include <stdint.h>
 #include <functional>

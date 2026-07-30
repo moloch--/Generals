@@ -38,11 +38,11 @@
  *   WWMemoryLogClass::Release_Memory -- frees memory                                          *
  * - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
-#include "always.h"
+#include "WWLib/always.h"
 #include "wwmemlog.h"
 #include "wwdebug.h"
-#include "Vector.h"
-#include "FastAllocator.h"
+#include "WWLib/Vector.h"
+#include "WWLib/FastAllocator.h"
 #ifndef _WIN32
 // GeneralsX @bugfix OpenAI 29/07/2026 Include the integer thread-ID adapter only on POSIX.
 #include "thread_compat.h"

@@ -29,7 +29,7 @@
 #include "PreRTS.h"	// This must go first in EVERY cpp file in the GameEngine
 
 #include "Common/Registry.h"
-#include "registryini.h"
+#include "WWLib/registryini.h" // GeneralsX @build OpenAI 30/07/2026 Keep cross-module includes valid with root-only WWVegas paths.
 
 // GeneralsX @build felipebraz 11/02/2026 Phase 1.5 - Linux port
 // Windows Registry types not available on Linux - define stub types

@@ -85,6 +85,8 @@ MultiplayerSettings::MultiplayerSettings()
 	m_showRandomColor = TRUE;
 	m_observerColor;
 	m_randomColor;
+	m_gotDefaultStartingMoney = false;
+
 	// GeneralsX @tweak fbraz 30/03/2026 Add larger starting money options to the default list
 	// Ensure these values exist so the UI dropdown includes them even if INI doesn't define them
 	{

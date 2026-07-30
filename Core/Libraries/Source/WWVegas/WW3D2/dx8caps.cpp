@@ -37,13 +37,17 @@
  * Functions:                                                                                  *
  * - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
-#include "always.h"
+#include "WWLib/always.h"
 #include "dx8caps.h"
 #include "dx8wrapper.h"
 #include "formconv.h"
 #pragma warning (disable : 4201)		// nonstandard extension - nameless struct
 #include <windows.h>
+#ifdef _WIN32
 #include <mmsystem.h>
+#else
+#include "WWAudio/mmsystem.h" // GeneralsX @build OpenAI 30/07/2026 Use the portable stub without restoring broad include paths.
+#endif
 
 static StringClass CapsWorkString;
 
@@ -1168,4 +1172,3 @@ void DX8Caps::Vendor_Specific_Hacks(const D3DADAPTER_IDENTIFIER8& adapter_id)
 		SupportDot3 = false;
 	}
 }
-

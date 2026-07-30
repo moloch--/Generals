@@ -448,7 +448,7 @@ public:  // ********************************************************************
 	// Drawable selection mechanisms
 	virtual void selectDrawable( Drawable *draw );					///< Mark given Drawable as "selected"
 	virtual void deselectDrawable( Drawable *draw );				///< Clear "selected" status from Drawable
-	virtual void deselectAllDrawables( Bool postMsg = true );							///< Clear the "select" flag from all drawables
+	virtual void deselectAllDrawables();							///< Clear the "select" flag from all drawables
 	virtual Int getSelectCount() { return m_selectCount; }		///< Get count of currently selected drawables
 	virtual Int getMaxSelectCount() { return m_maxSelectCount; }	///< Get the max number of selected drawables
 	virtual UnsignedInt getFrameSelectionChanged() { return m_frameSelectionChanged; }	///< Get the max number of selected drawables
@@ -811,6 +811,7 @@ protected:
 		{
 			LabelType_Team,
 			LabelType_Money,
+			LabelType_MoneyPerMinute,
 			LabelType_Rank,
 			LabelType_Xp,
 
@@ -821,6 +822,7 @@ protected:
 		{
 			ValueType_Team,
 			ValueType_Money,
+			ValueType_MoneyPerMinute,
 			ValueType_Rank,
 			ValueType_Xp,
 			ValueType_Name,

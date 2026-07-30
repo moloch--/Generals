@@ -750,6 +750,15 @@ Int Object::getTransportSlotCount() const
 	return count;
 }
 
+void Object::friend_setContainedBy(Object* containedBy)
+{
+	m_containedBy = containedBy;
+
+#if !RETAIL_COMPATIBLE_CRC
+	m_containedByFrame = containedBy ? TheGameLogic->getFrame() : 0;
+#endif
+}
+
 const Object* Object::getEnclosingContainedBy() const
 {
 	for (const Object* child = this, *container = getContainedBy(); container; child = container, container = container->getContainedBy())
@@ -1878,7 +1887,7 @@ void Object::reactToTransformChange(const Matrix3D* oldMtx, const Coord3D* oldPo
 
 		Region3D mapExtent;
 		TheTerrainLogic->getExtent(&mapExtent);
-		if (mapExtent.isInRegionNoZ(getPosition()))
+		if (mapExtent.isInRegionNoZ(*getPosition()))
 			m_privateStatus &= ~OFF_MAP;
 		else
 			m_privateStatus |= OFF_MAP;
@@ -1927,7 +1936,7 @@ void Object::attemptDamage( DamageInfo *damageInfo )
 
 			// Set up the shockwave force to use apply on object
 			Coord3D shockWaveForce;
-			shockWaveForce.set( &damageInfo->in.m_shockWaveVector );
+			shockWaveForce.set( damageInfo->in.m_shockWaveVector );
 			shockWaveForce.normalize();
 			shockWaveForce.scale( damageInfo->in.m_shockWaveAmount * shockTaperMult );
 			shockWaveForce.z = shockWaveForce.length(); // Apply up force equal to the lateral force for dramatic effect
@@ -2907,7 +2916,7 @@ void Object::friend_notifyOfNewMapBoundary()
 
 	Region3D mapExtent;
 	TheTerrainLogic->getExtent(&mapExtent);
-	if (mapExtent.isInRegionNoZ(getPosition()))
+	if (mapExtent.isInRegionNoZ(*getPosition()))
 		m_privateStatus &= ~OFF_MAP;
 	else
 		m_privateStatus |= OFF_MAP;
@@ -3238,7 +3247,7 @@ void Object::createVeterancyLevelFX(VeterancyLevel oldLevel, VeterancyLevel newL
 			Anim2DTemplate *animTemplate = TheAnim2DCollection->findTemplate( TheGlobalData->m_levelGainAnimationName );
 
 			Coord3D pos = *getPosition();
-			pos.add(&m_healthBoxOffset);
+			pos.add(m_healthBoxOffset);
 
 			TheInGameUI->addWorldAnimation( animTemplate,
 																			&pos,
@@ -3454,7 +3463,7 @@ void Object::getHealthBoxPosition(Coord3D& pos) const
 {
 	pos = *getPosition();
 	pos.z += getGeometryInfo().getMaxHeightAbovePosition() + 10;
-	pos.add(&m_healthBoxOffset);
+	pos.add(m_healthBoxOffset);
 
 	// this needs to get moved to the mobspawnerupdate
 	if (isKindOf(KINDOF_MOB_NEXUS)) // quicker idiot test
@@ -4293,8 +4302,9 @@ void Object::xfer( Xfer *xfer )
 		// No, the contain module is just going to friend_ reach in and set this for us.
 		// Containers more complicated than Open (like Tunnel) can't do that.  Our variable,
 		// our responsibility.
-#if !RETAIL_COMPATIBLE_CRC
+#if RETAIL_COMPATIBLE_CRC
 		// TheSuperHackers @tweak Contained by ID is already set with retail compatibility; don't overwrite it.
+#else
 		if( xfer->getXferMode() == XFER_SAVE )
 		{
 			if( m_containedBy != nullptr )

@@ -48,7 +48,11 @@
 //-----------------------------------------------------------------------------
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#ifdef _WIN32
 #include <mmsystem.h>
+#else
+#include "WWAudio/mmsystem.h" // GeneralsX @build OpenAI 30/07/2026 Use the portable stub without restoring broad include paths.
+#endif
 #include <time.h>
 //-----------------------------------------------------------------------------
 // USER INCLUDES //////////////////////////////////////////////////////////////

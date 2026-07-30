@@ -36,7 +36,7 @@
 #include <time.h>
 #include <errno.h>
 #include <stdlib.h>
-#include <WWCommon.h>
+#include <WWLib/WWCommon.h>
 #ifdef _WIN32
 #include <process.h>
 #include <io.h>
@@ -1872,5 +1872,4 @@ bool Prepare_Directories(const char *rootdir, const char *filename)
 	}
 	return(true);
 }
-
 

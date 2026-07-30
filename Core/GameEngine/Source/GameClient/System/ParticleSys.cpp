@@ -1518,8 +1518,8 @@ const Coord3D *ParticleSystem::computeParticleVelocity( const Coord3D *pos )
 					up.x = 0.0;
 					up.y = 0.0;
 					up.z = 1.0;
-					perp.crossProduct( &up, &along, &perp );
-					up.crossProduct( &along, &perp, &up );
+					perp.crossProduct( up, along, perp );
+					up.crossProduct( along, perp, up );
 
 					// "speed" is in 'horizontal' plane, and "otherSpeed" is 'vertical'
 					newVel.x = speed * perp.x + otherSpeed * up.x;
@@ -3032,7 +3032,8 @@ void ParticleSystemManager::update()
 				continue;
 
 			// temporary hack that checks if texture name starts with "SMUD" - if so, we can assume it's a smudge type
-			if (/*sys->isUsingSmudge()*/ *((DWORD *)sys->getParticleTypeName().str()) == 0x44554D53)
+	// GeneralsX @bugfix OpenAI 30/07/2026 Avoid unaligned, out-of-bounds DWORD reads on ARM64.
+	if (/*sys->isUsingSmudge()*/ sys->getParticleTypeName().startsWith("SMUD"))
 			{
 				for (Particle *p = sys->getFirstParticle(); p; p = p->m_systemNext)
 				{
@@ -3540,4 +3541,3 @@ static Real angleBetween(const Coord2D *vecA, const Coord2D *vecB)
 
 	return -theta;
 }
-

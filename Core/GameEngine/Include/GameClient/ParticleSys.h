@@ -743,8 +743,8 @@ public:
 
 	typedef std::list<ParticleSystem*> ParticleSystemList;
 	typedef ParticleSystemList::iterator ParticleSystemListIt;
-	typedef std::hash_map<ParticleSystemID, ParticleSystem *, rts::hash<ParticleSystemID>, rts::equal_to<ParticleSystemID> > ParticleSystemIDMap;
-	typedef std::hash_map<AsciiString, ParticleSystemTemplate *, rts::hash<AsciiString>, rts::equal_to<AsciiString> > TemplateMap;
+	typedef std::hash_map<ParticleSystemID, ParticleSystem *, rts::hash<ParticleSystemID>, rts::equal_to<ParticleSystemID>/**/> ParticleSystemIDMap;
+	typedef std::hash_map<AsciiString, ParticleSystemTemplate *, rts::hash<AsciiString>, rts::equal_to<AsciiString>/**/> TemplateMap;
 
 	ParticleSystemManager();
 	virtual ~ParticleSystemManager() override;
@@ -761,8 +761,11 @@ public:
 	ParticleSystemTemplate *newTemplate( const AsciiString &name );
 
 	/// given a template, instantiate a particle system
-	ParticleSystem *createParticleSystem( const ParticleSystemTemplate *sysTemplate,
-																				Bool createSlaves = TRUE );
+#if RETAIL_COMPATIBLE_CRC
+	virtual ParticleSystem *createParticleSystem( const ParticleSystemTemplate *sysTemplate, Bool createSlaves = TRUE );
+#else
+	ParticleSystem* createParticleSystem(const ParticleSystemTemplate* sysTemplate, Bool createSlaves = TRUE);
+#endif
 
 	/** given a template, instantiate a particle system.
 		if attachTo is not null, attach the particle system to the given object.
@@ -837,9 +840,21 @@ private:
 
 // TheSuperHackers @feature bobtista 31/01/2026
 // ParticleSystemManager that does nothing. Used for Headless Mode.
+// Does not load particle system templates and does not create particle systems.
 class ParticleSystemManagerDummy : public ParticleSystemManager
 {
 public:
+#if RETAIL_COMPATIBLE_CRC
+	// The creation of particle systems needs to be handled explicitly,
+	// because they're not destroyed in the update function anymore.
+	virtual ParticleSystem* createParticleSystem(const ParticleSystemTemplate* sysTemplate, Bool createSlaves = TRUE) override { return nullptr; }
+
+	// Must not overload init to keep loading the particle system templates,
+	// which are unfortunately needed to preserve the correct logic crc.
+#else
+	virtual void init() override {}
+	virtual void reset() override {}
+#endif
 	// GeneralsX @bugfix fbraz 04/05/2026 Prevent headless replay from entering full particle update path.
 	virtual void update() override {}
 	virtual Int getOnScreenParticleCount() override { return 0; }

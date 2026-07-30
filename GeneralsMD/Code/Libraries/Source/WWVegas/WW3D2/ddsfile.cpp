@@ -19,12 +19,12 @@
 // 08/06/02 KM Added cube map and volume texture support
 
 #include "ddsfile.h"
-#include "ffactory.h"
-#include "bufffile.h"
-#include "formconv.h"
-#include "dx8wrapper.h"
-#include "bitmaphandler.h"
-#include "colorspace.h"
+#include "WWLib/ffactory.h"
+#include "WWLib/bufffile.h"
+#include "WW3D2/formconv.h"
+#include "WW3D2/dx8wrapper.h"
+#include "WW3D2/bitmaphandler.h"
+#include "WW3D2/colorspace.h"
 
 // GeneralsX @build fbraz 10/02/2026 DirectDraw header Windows-only
 // Linux: Define DDS constants locally (fighter19 pattern)

@@ -58,11 +58,11 @@
 
 #pragma once
 
-#include "always.h"
+#include "WWLib/always.h"
 #include "vector3.h"
-#include "wwdebug.h"
+#include "WWDebug/wwdebug.h"
 #ifdef _UNIX
-#include "osdep.h"
+#include "WWLib/osdep.h" // GeneralsX @build OpenAI 30/07/2026 Keep cross-module includes valid with root-only WWVegas paths.
 #endif
 
 

@@ -14,7 +14,7 @@
  */
 #pragma once
 
-#include "always.h"
+#include "WWLib/always.h" // GeneralsX @build OpenAI 30/07/2026 Keep cross-module includes valid with root-only WWVegas paths.
 
 #include <functional>
 #include <vector>

@@ -5,6 +5,7 @@
       "zlib",
       "glm",
       "gli",
+      "stb",
       {
         "name": "freetype",
         "platform": "!windows"

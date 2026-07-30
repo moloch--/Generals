@@ -36,7 +36,7 @@
 
 #pragma once
 
-#include "always.h"
+#include "WWLib/always.h"
 
 // TheSuperHackers @build 09/02/2026 Conditionally include Miles (Windows only)
 #if !defined(SAGE_USE_OPENAL)
@@ -47,10 +47,10 @@
 #include "MilesStub.h"
 #endif
 
-#include "Vector.h"
+#include "WWLib/Vector.h"
 #include "SoundBuffer.h"
 #include "AudioEvents.h"
-#include "wwstring.h"
+#include "WWLib/wwstring.h"
 
 /////////////////////////////////////////////////////////////////////////////////
 // Forward declaration

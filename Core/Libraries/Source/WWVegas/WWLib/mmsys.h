@@ -41,5 +41,9 @@
 */
 
 #pragma warning(disable:4201)
+#ifdef _WIN32
 #include <mmsystem.h>
+#else
+#include "WWAudio/mmsystem.h" // GeneralsX @build OpenAI 30/07/2026 Use the portable stub without restoring broad include paths.
+#endif
 #pragma warning(default:4201)

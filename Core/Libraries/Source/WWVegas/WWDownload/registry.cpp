@@ -24,9 +24,9 @@
 #include <string>
 
 #ifdef _WIN32
-#include "win.h"
+#include "WWLib/win.h"
 #else
-#include "registryini.h"
+#include "WWLib/registryini.h" // GeneralsX @build OpenAI 30/07/2026 Keep cross-module includes valid with root-only WWVegas paths.
 #ifndef HKEY_LOCAL_MACHINE
 typedef void *HKEY;
 #define HKEY_LOCAL_MACHINE ((HKEY)0x80000002)
@@ -266,5 +266,3 @@ void setGamePath( unsigned int index, std::string path ) {}
 void getGamePath( std::string &path ) {}
 
 #endif // _WIN32
-
-

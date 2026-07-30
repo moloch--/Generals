@@ -126,6 +126,20 @@ Real FrameRateLimit::wait(UnsignedInt maxFps)
 #endif
 }
 
+void FrameRateLimit::reset()
+{
+#ifdef _WIN32
+	LARGE_INTEGER tick;
+	QueryPerformanceCounter(&tick);
+	m_start = tick.QuadPart;
+#else
+	// GeneralsX @build OpenAI 30/07/2026 Keep the timing reset portable on macOS and Linux.
+	struct timespec tick;
+	clock_gettime(CLOCK_MONOTONIC, &tick);
+	m_start = static_cast<Int64>(tick.tv_sec) * 1000000000 + tick.tv_nsec;
+#endif
+}
+
 
 const UnsignedInt RenderFpsPreset::s_fpsValues[] = {
 	30, 50, 56, 60, 65, 70, 72, 75, 80, 85, 90, 100, 110, 120, 144, 240, 480, UncappedFpsValue };

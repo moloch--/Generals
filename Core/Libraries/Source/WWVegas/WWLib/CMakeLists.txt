@@ -177,18 +177,14 @@ set_target_properties(core_wwlib PROPERTIES OUTPUT_NAME wwlib)
 
 target_sources(core_wwlib PRIVATE ${WWLIB_SRC})
 
-target_include_directories(core_wwlib PUBLIC
-    ${CMAKE_CURRENT_SOURCE_DIR}
-)
-
 target_precompile_headers(core_wwlib PRIVATE
     [["Utility/CppMacros.h"]] # Must be first, to be removed when abandoning VC6
-    always.h
-    STLUtils.h
-    win.h
-    WWCommon.h
-    wwstring.h
-    [["PchCompat.h"]] # TheSuperHackers @build 08/02/2026 Platform-safe windows.h wrapper
+    [["WWLib/always.h"]]
+    [["WWLib/STLUtils.h"]]
+    [["WWLib/win.h"]]
+    [["WWLib/WWCommon.h"]]
+    [["WWLib/wwstring.h"]]
+    [["WWLib/PchCompat.h"]] # GeneralsX @bugfix moloch 30/07/2026 Keep the shared PCH resolvable for MinGW.
 )
 
 target_link_libraries(core_wwlib PRIVATE

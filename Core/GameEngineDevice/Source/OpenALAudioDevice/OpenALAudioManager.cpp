@@ -921,7 +921,6 @@ void OpenALAudioManager::playAudioEvent(AudioEventRTS* event)
 
 			if (source) {
 				audio->m_bufferHandle = playSample3D(event, audio);
-				m_sound->notifyOf3DSampleStart();
 			}
 
 			if (!audio->m_bufferHandle)
@@ -981,7 +980,6 @@ void OpenALAudioManager::playAudioEvent(AudioEventRTS* event)
 
 			if (source) {
 				audio->m_bufferHandle = playSample(event, audio);
-				m_sound->notifyOf2DSampleStart();
 			}
 
 			if (!audio->m_bufferHandle) {
@@ -1094,7 +1092,8 @@ void OpenALAudioManager::killAudioEventImmediately(AudioHandle audioEvent)
 	for (ait = m_audioRequests.begin(); ait != m_audioRequests.end(); ait++)
 	{
 		AudioRequest* req = (*ait);
-		if (req && req->m_request == AR_Play && req->m_handleToInteractOn == audioEvent)
+		// GeneralsX @bugfix xezon 13/06/2026 Mirror GeneralsGameCode PR #2784 for OpenAL pending requests.
+		if (req && req->m_usePendingEvent && req->m_pendingEvent->getPlayingHandle() == audioEvent)
 		{
 			deleteInstance(req);
 			ait = m_audioRequests.erase(ait);
@@ -1209,20 +1208,6 @@ void OpenALAudioManager::releaseOpenALHandles(PlayingAudio* release)
 //-------------------------------------------------------------------------------------------------
 void OpenALAudioManager::releasePlayingAudio(PlayingAudio* release)
 {
-	// GeneralsX @bugfix BenderAI 11/03/2026 - guard against null getAudioEventInfo() return
-	const AudioEventInfo* releaseInfo = (release->m_audioEventRTS ? release->m_audioEventRTS->getAudioEventInfo() : nullptr);
-	if (releaseInfo && releaseInfo->m_soundType == AT_SoundEffect) {
-		if (release->m_type == PAT_Sample) {
-			if (release->m_source) {
-				m_sound->notifyOf2DSampleCompletion();
-			}
-		}
-		else {
-			if (release->m_source) {
-				m_sound->notifyOf3DSampleCompletion();
-			}
-		}
-	}
 	releaseOpenALHandles(release);	// forces stop of this audio
 	closeBuffer(release->m_bufferHandle);
 	if (release->m_cleanupAudioEventRTS) {
@@ -1924,6 +1909,22 @@ UnsignedInt OpenALAudioManager::getNum3DSamples(void) const
 UnsignedInt OpenALAudioManager::getNumStreams(void) const
 {
 	return m_numStreams;
+}
+
+//-------------------------------------------------------------------------------------------------
+UnsignedInt OpenALAudioManager::getNumAvailable2DSamples(void) const
+{
+	// GeneralsX @bugfix Mr. Meeseeks 27/06/2026 Fix available samples calculation to prevent voiceline culling.
+	const UnsignedInt playing = (UnsignedInt)m_playingSounds.size();
+	return m_num2DSamples > playing ? m_num2DSamples - playing : 0;
+}
+
+//-------------------------------------------------------------------------------------------------
+UnsignedInt OpenALAudioManager::getNumAvailable3DSamples(void) const
+{
+	// GeneralsX @bugfix Mr. Meeseeks 27/06/2026 Fix available samples calculation to prevent voiceline culling.
+	const UnsignedInt playing = (UnsignedInt)m_playing3DSounds.size();
+	return m_num3DSamples > playing ? m_num3DSamples - playing : 0;
 }
 
 //-------------------------------------------------------------------------------------------------

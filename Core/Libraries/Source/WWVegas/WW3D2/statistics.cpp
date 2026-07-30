@@ -17,8 +17,8 @@
 */
 
 #include "statistics.h"
-#include "wwstring.h"
-#include "simplevec.h"
+#include "WWLib/wwstring.h"
+#include "WWLib/simplevec.h"
 #include "dx8renderer.h"
 #include "dx8wrapper.h"
 #include "dx8caps.h"
@@ -27,7 +27,7 @@
 
 #include <memory.h>
 #ifdef _UNIX
-#include "osdep.h"
+#include "WWLib/osdep.h" // GeneralsX @build OpenAI 30/07/2026 Keep cross-module includes valid with root-only WWVegas paths.
 #endif
 
 // ----------------------------------------------------------------------------
@@ -390,4 +390,3 @@ void Debug_Statistics::Shutdown_Statistics()
 	texture_statistics_string.Release_Resources();
 }
 // ----------------------------------------------------------------------------
-

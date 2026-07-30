@@ -20,7 +20,7 @@
 #include "DownloadDebug.h"
 #include "Download.h"
 // GeneralsX @bugfix OpenAI 29/07/2026 Restore bounded string helpers for Windows toolchains.
-#include "stringex.h"
+#include "WWLib/stringex.h"
 
 // GeneralsX @refactor BenderAI 10/02/2026
 // Added platform guards for Windows-specific headers

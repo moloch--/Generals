@@ -36,14 +36,14 @@
 
 #pragma once
 
-#include "always.h"
-#include "wwdebug.h"
-#include "Vector.h"
-#include "vertmaterial.h"
+#include "WWLib/always.h"
+#include "WWDebug/wwdebug.h"
+#include "WWLib/Vector.h"
+#include "WW3D2/vertmaterial.h"
 #include "texture.h"
-#include "shader.h"
+#include "WW3D2/shader.h"
 #ifdef _UNIX
-#include "osdep.h"
+#include "WWLib/osdep.h" // GeneralsX @build OpenAI 30/07/2026 Keep cross-module includes valid with root-only WWVegas paths.
 #endif
 
 class MeshModelClass;
