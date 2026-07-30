@@ -125,14 +125,18 @@ All build scripts **automatically check** for images and vcpkg:
 
 ```bash
 # Build Zero Hour (mingw-w64-i686 preset)
-./scripts/docker-build-mingw-zh.sh
+./scripts/build/linux/docker-build-mingw-zh.sh
 
 # Or specify preset explicitly
-./scripts/docker-build-mingw-zh.sh mingw-w64-i686
+./scripts/build/linux/docker-build-mingw-zh.sh mingw-w64-i686
 ```
 
 **Output**: Windows .exe binaries
-- `build/mingw-w64-i686/GeneralsMD/GeneralsXZH.exe`
+- `build/mingw-w64-i686/GeneralsMD/generalszh.exe`
+
+This is currently compile/link validation only. See
+[`docs/BUILD/WINDOWS.md`](../../BUILD/WINDOWS.md) for the unresolved runtime
+dependencies.
 
 ### Testing
 

@@ -23,6 +23,9 @@
 
 #if !(defined(_MSC_VER) && _MSC_VER < 1300)
 #include <atomic>
+#if (!defined(__cpp_lib_atomic_wait) || __cpp_lib_atomic_wait < 201907L) && !defined(_WIN32)
+#include <thread>
+#endif
 #endif
 
 // Always use mutex or critical section when accessing the same data from multiple threads!
@@ -180,7 +183,14 @@ public:
         ;
 #else
         while (cs.Flag.test_and_set(std::memory_order_acq_rel)) {
+#if defined(__cpp_lib_atomic_wait) && __cpp_lib_atomic_wait >= 201907L
             cs.Flag.wait(true, std::memory_order_relaxed);
+#elif defined(_WIN32)
+            // GeneralsX @bugfix OpenAI 29/07/2026 Yield when the MinGW standard library lacks C++20 atomic wait.
+            ThreadClass::Switch_Thread();
+#else
+            std::this_thread::yield();
+#endif
         }
 #endif
     }
@@ -190,7 +200,9 @@ public:
       cs.Flag=0;
 #else
       cs.Flag.clear(std::memory_order_release);
+#if defined(__cpp_lib_atomic_wait) && __cpp_lib_atomic_wait >= 201907L
       cs.Flag.notify_one();
+#endif
 #endif
     }
 

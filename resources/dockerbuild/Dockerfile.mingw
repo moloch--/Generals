@@ -12,6 +12,7 @@ LABEL version="1.0"
 ENV DEBIAN_FRONTEND=noninteractive
 
 # Install cross-compilation toolchain
+# GeneralsX @bugfix OpenAI 29/07/2026 Install widl for MinGW COM interface generation.
 RUN apt-get update -qq && \
     apt-get install -y -qq --no-install-recommends \
         build-essential \
@@ -25,6 +26,7 @@ RUN apt-get update -qq && \
         pkg-config \
         mingw-w64 \
         wine64 \
+        wine64-tools \
         && \
     rm -rf /var/lib/apt/lists/*
 

@@ -8,7 +8,10 @@
 
 #pragma once
 
-#if defined(SAGE_USE_OPENAL) && !defined(_WIN32)
+#if defined(__MINGW32__)
+    // GeneralsX @bugfix OpenAI 29/07/2026 Forward Windows builds to the MinGW multimedia SDK header.
+    #include_next <mmsystem.h>
+#elif defined(SAGE_USE_OPENAL) && !defined(_WIN32)
     #ifndef _MMSYSTEM_H_
     #define _MMSYSTEM_H_
 

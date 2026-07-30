@@ -35,6 +35,12 @@
 //#include "GameNetwork/NetworkInterface.h"
 #include "GameNetwork/udp.h"
 
+// GeneralsX @bugfix OpenAI 29/07/2026 Match the socket address length type required by Winsock and POSIX.
+#ifdef _WIN32
+typedef int SocketLength;
+#else
+typedef socklen_t SocketLength;
+#endif
 
 //-------------------------------------------------------------------------
 
@@ -191,8 +197,6 @@ Int UDP::Bind(UnsignedInt IP,UnsignedShort Port)
     return(status);
   }
 
-// GeneralsX @bugfix BenderAI 13/02/2026 Use socklen_t for POSIX socket functions (fighter19 pattern)
-socklen_t namelen=sizeof(addr);
   retval=SetBlocking(FALSE);
   if (retval==-1)
     fprintf(stderr,"Couldn't set nonblocking mode!\n");
@@ -272,8 +276,7 @@ Int UDP::Write(const unsigned char *msg,UnsignedInt len,UnsignedInt IP,UnsignedS
 Int UDP::Read(unsigned char *msg,UnsignedInt len,sockaddr_in *from)
 {
   Int retval;
-  // GeneralsX @bugfix BenderAI 13/02/2026 Use socklen_t for POSIX socket functions (fighter19 pattern)
-  socklen_t alen=sizeof(sockaddr_in);
+  SocketLength alen=sizeof(sockaddr_in);
 
   if (from!=nullptr)
   {
@@ -530,8 +533,7 @@ Int UDP::SetOutputBuffer(UnsignedInt bytes)
 int UDP::GetInputBuffer()
 {
    int retval,arg=0;
-   // GeneralsX @bugfix BenderAI 13/02/2026 Use socklen_t for POSIX socket functions (fighter19 pattern)
-   socklen_t len=sizeof(int);
+   SocketLength len=sizeof(int);
 
    retval=getsockopt(fd,SOL_SOCKET,SO_RCVBUF,
      (char *)&arg,&len);
@@ -542,8 +544,7 @@ int UDP::GetInputBuffer()
 int UDP::GetOutputBuffer()
 {
    int retval,arg=0;
-   // GeneralsX @bugfix BenderAI 13/02/2026 Use socklen_t for POSIX socket functions (fighter19 pattern)
-   socklen_t len=sizeof(int);
+   SocketLength len=sizeof(int);
 
    retval=getsockopt(fd,SOL_SOCKET,SO_SNDBUF,
      (char *)&arg,&len);

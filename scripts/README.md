@@ -138,9 +138,13 @@ CNC_GENERALS_PATH="/path/to/Generals" \
 # Build Windows .exe via MinGW in Docker
 ./scripts/build/linux/docker-build-mingw-zh.sh
 
-# Output: build/mingw-w64-i686/GeneralsMD/GeneralsXZH.exe
-# Test in Windows VM or Wine
+# Output: build/mingw-w64-i686/GeneralsMD/generalszh.exe
 ```
+
+This exploratory target currently validates 32-bit Windows cross-compilation
+only. The executable still needs retail-compatible Bink/Miles import
+decoration and a replacement for its `d3dx8d.dll` dependency before it is
+runtime-ready.
 
 ---
 

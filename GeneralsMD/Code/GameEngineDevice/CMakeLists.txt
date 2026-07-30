@@ -196,9 +196,7 @@ if(WIN32)
 #        Source/Win32Device/Common/Win32LocalFile.cpp
 #        Source/Win32Device/Common/Win32LocalFileSystem.cpp
         Source/Win32Device/Common/Win32OSDisplay.cpp
-        Source/Win32Device/GameClient/Win32DIKeyboard.cpp
 #        Source/Win32Device/GameClient/Win32DIMouse.cpp
-        Source/Win32Device/GameClient/Win32Mouse.cpp
     )
 else()
     # Linux-specific files (SDL3, OpenAL+FFmpeg audio, DXVK)

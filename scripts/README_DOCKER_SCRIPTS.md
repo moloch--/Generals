@@ -38,7 +38,7 @@ The content below is kept for reference but please use the resources above for c
 # Fast builds (no package installation!)
 ./scripts/docker-build-linux-zh.sh       # Zero Hour (Linux)
 ./scripts/docker-build-linux-generals.sh # Generals (Linux)
-./scripts/docker-build-mingw-zh.sh       # Zero Hour (Windows .exe)
+./scripts/build/linux/docker-build-mingw-zh.sh # Zero Hour (Windows .exe)
 ```
 
 **Key Benefits**:
@@ -113,12 +113,12 @@ The content below is kept for reference but please use the resources above for c
 
 **`docker-build-mingw-zh.sh [preset]`**
 - Cross-compiles Windows .exe using MinGW in Docker
-- Output: `build/mingw-w64-i686/GeneralsMD/GeneralsXZH.exe`
+- Output: `build/mingw-w64-i686/GeneralsMD/generalszh.exe`
 - Log: `logs/build_zh_mingw-w64-i686_docker.log`
-- **Testing**: Run in Windows VM or Wine
+- **Status**: Compile/link validation only; the output is not yet runtime-ready
 
 ```bash
-./scripts/docker-build-mingw-zh.sh
+./scripts/build/linux/docker-build-mingw-zh.sh
 ```
 
 ### Smoke Test
@@ -171,11 +171,15 @@ All scripts are integrated into VS Code tasks (Cmd+Shift+P → "Tasks: Run Task"
 
 ```bash
 # Build Windows .exe on macOS/Linux using MinGW
-./scripts/docker-build-mingw-zh.sh
+./scripts/build/linux/docker-build-mingw-zh.sh
 
-# Result: build/mingw-w64-i686/GeneralsMD/GeneralsXZH.exe
-# Test in Windows VM or Wine
+# Result: build/mingw-w64-i686/GeneralsMD/generalszh.exe
 ```
+
+The exploratory MinGW target proves that the source compiles and links as a
+32-bit PE. It still needs retail-compatible Bink/Miles imports and a
+replacement for the unavailable `d3dx8d.dll` before Windows or Wine launch
+testing is meaningful.
 
 ## Environment Variables
 

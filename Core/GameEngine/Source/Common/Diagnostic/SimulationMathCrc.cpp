@@ -25,7 +25,7 @@
 #include "GameLogic/FPUControl.h"
 
 #include <math.h>
-#ifndef _WIN32
+#if !defined(_WIN32) || defined(__MINGW32__)
 #include <fenv.h>
 #endif
 
@@ -69,9 +69,10 @@ UnsignedInt SimulationMathCrc::calculate()
     appendSimulationMathCrc(xfer);
 
     // GeneralsX @build BenderAI 12/03/2026 Restore the default FP environment portably after CRC sampling.
-#ifdef _WIN32
+#if defined(_WIN32) && !defined(__MINGW32__)
     _fpreset();
 #else
+    // GeneralsX @bugfix OpenAI 29/07/2026 Restore MinGW's FP environment through its strict-mode API.
     fesetenv(FE_DFL_ENV);
     feclearexcept(FE_ALL_EXCEPT);
 #endif

@@ -1382,10 +1382,11 @@ AsciiString GlobalData::BuildUserDataPathFromRegistry()
 	// GeneralsX @refactor Bender 01/04/2026 Windows-specific path handling (Registry-based)
 	// Integrates upstream bug-fix for OneDrive/Group Policy folder redirection
 #if defined(_MSC_VER) && (_MSC_VER < 1300)
-	// VC6 lacks FOLDERID_Documents and KF_FLAG_DEFAULT
+	// VC6 lacks FOLDERID_Documents
 	const GUID FOLDERID_Documents = { 0xFDD39AD0, 0x238F, 0x46AF, 0xAD, 0xB4, 0x6C, 0x85, 0x48, 0x03, 0x69, 0xC7 };
-	const DWORD KF_FLAG_DEFAULT = 0;
 #endif
+	// GeneralsX @bugfix OpenAI 29/07/2026 Avoid SDK-version gating of the zero-valued default known-folder flag.
+	const DWORD knownFolderFlags = 0;
 
 	typedef HRESULT(WINAPI* PFN_SHGetKnownFolderPath)(const GUID& rfid, DWORD dwFlags, HANDLE hToken, PWSTR* ppszPath);
 
@@ -1402,7 +1403,7 @@ AsciiString GlobalData::BuildUserDataPathFromRegistry()
 
 	if (pSHGetKnownFolderPath) {
 		PWSTR pszPath = nullptr;
-		HRESULT hr = pSHGetKnownFolderPath(FOLDERID_Documents, KF_FLAG_DEFAULT, nullptr, &pszPath);
+		HRESULT hr = pSHGetKnownFolderPath(FOLDERID_Documents, knownFolderFlags, nullptr, &pszPath);
 
 		if (SUCCEEDED(hr) && pszPath) {
 			myDocumentsDirectory.translate(pszPath);

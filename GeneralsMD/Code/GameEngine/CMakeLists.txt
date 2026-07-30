@@ -1153,10 +1153,14 @@ add_library(z_gameengine STATIC)
 
 target_sources(z_gameengine PRIVATE ${GAMEENGINE_SRC})
 
-target_include_directories(z_gameengine PUBLIC
-    Include
-    ../CompatLib/Include  # Needed for d3dx8math.h in PCH
-)
+target_include_directories(z_gameengine PUBLIC Include)
+
+# GeneralsX @bugfix OpenAI 29/07/2026 Use native DirectX headers for Windows builds.
+if(NOT WIN32)
+    target_include_directories(z_gameengine PUBLIC
+        ../CompatLib/Include  # Needed for d3dx8math.h in PCH
+    )
+endif()
 
 # Ensure DXVK headers are available when building on Linux
 if(NOT SAGE_USE_DX8 AND dxvk_SOURCE_DIR)

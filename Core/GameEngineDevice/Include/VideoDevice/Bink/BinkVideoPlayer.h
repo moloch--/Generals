@@ -46,12 +46,12 @@
 //----------------------------------------------------------------------------
 
 #include "GameClient/VideoPlayer.h"
-// GeneralsX @TheSuperHackers @build BenderAI 11/02/2026 Stub Bink for Phase 1 (proprietary SDK)
-// TODO Phase 3: Replace with FFmpeg or skip videos gracefully
-// #include "bink.h"
-
-// Bink type stubs (proprietary SDK not available)
+#ifdef _WIN32
+// GeneralsX @bugfix OpenAI 29/07/2026 Use the fetched Bink SDK interface for native Windows playback.
+#include "bink.h"
+#else
 typedef struct BINK* HBINK;
+#endif
 
 //----------------------------------------------------------------------------
 //           Forward References

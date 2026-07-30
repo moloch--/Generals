@@ -479,9 +479,13 @@ docker run --rm -v "$PWD:/work" -w /work ubuntu:22.04 bash -c "
   cmake --build build/mingw-w64-i686 --target z_generals
 "
 
-# Result: build/mingw-w64-i686/GeneralsMD/GeneralsXZH.exe (Windows PE)
-# Runs on: Windows natively, or Linux via Wine+DXVK
+# Result: build/mingw-w64-i686/GeneralsMD/generalszh.exe (Windows PE)
 ```
+
+The MinGW target currently validates compilation and linking only. It still
+needs the retail Bink/Miles import ABI and D3DX dependency repaired before
+Windows or Wine launch testing; see
+[`docs/BUILD/WINDOWS.md`](../../BUILD/WINDOWS.md).
 
 ### Why This Rocks
 - ✅ **No toolchain pollution** on your Mac

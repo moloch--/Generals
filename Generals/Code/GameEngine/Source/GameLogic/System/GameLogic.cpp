@@ -29,7 +29,7 @@
 
 #include "PreRTS.h"	// This must go first in EVERY cpp file in the GameEngine
 
-#ifndef _WIN32
+#if !defined(_WIN32) || defined(__MINGW32__)
 #include <fenv.h>
 #if defined(__SSE__) || defined(__x86_64__)
 #include <xmmintrin.h>
@@ -201,7 +201,8 @@ void setFPMode()
 	// is in the (vain?) hope of any slight speed boost.
 	//
 	// GeneralsX @bugfix BenderAI 14/03/2026 Align non-Windows x86 FPU control with the Windows replay determinism baseline.
-	#ifdef _WIN32
+	// GeneralsX @bugfix OpenAI 29/07/2026 Use the portable x87 path when strict-mode MinGW hides MSVC CRT controls.
+	#if defined(_WIN32) && !defined(__MINGW32__)
 	_fpreset();
 
 	UnsignedInt curVal = _statusfp();

@@ -54,10 +54,10 @@
 #if defined(__APPLE__)
 #include <TargetConditionals.h>
 #endif
-// GeneralsX @build BenderAI 10/02/2026 - Need LoadLibrary/GetProcAddress/FreeLibrary for dynamic loading
+#ifndef _WIN32
+// GeneralsX @bugfix OpenAI 29/07/2026 Use CompatLib dynamic loading only on POSIX; Windows supplies the native API.
 #include "module_compat.h"
 // GeneralsX @build felipebraz 16/02/2026 - Need dlerror() for dlopen() error reporting on Linux
-#ifndef _WIN32
 #include <dlfcn.h>
 #endif
 // GeneralsX @build BenderAI 10/02/2026 - Embedded browser Windows-only (requires COM LPDISPATCH)

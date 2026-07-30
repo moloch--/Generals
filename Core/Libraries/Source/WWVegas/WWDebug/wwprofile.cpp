@@ -61,6 +61,10 @@
 #include "cpudetect.h"
 #include "hashtemplate.h"
 #include <Utility/intrin_compat.h>
+#ifndef _WIN32
+// GeneralsX @bugfix OpenAI 29/07/2026 Use the POSIX thread compatibility type only on POSIX.
+#include "thread_compat.h"
+#endif
 
 static SimpleDynVecClass<WWProfileHierarchyNodeClass*> ProfileCollectVector;
 static double TotalFrameTimes;
@@ -352,9 +356,11 @@ WWProfileHierarchyNodeClass	*	WWProfileManager::CurrentRootNode = &WWProfileMana
 int									WWProfileManager::FrameCounter = 0;
 __int64								WWProfileManager::ResetTime = 0;
 
-// GeneralsX @bugfix BenderAI 24/02/2026 Phase 5 - ThreadID type must match THREAD_ID on all platforms
-#include "thread_compat.h"
-static THREAD_ID				ThreadID = {};  // Default-initialized thread ID (platform-specific)
+#ifdef _WIN32
+static unsigned int			ThreadID = static_cast<unsigned int>(-1);
+#else
+static THREAD_ID				ThreadID = {};
+#endif
 
 
 /***********************************************************************************************
@@ -1122,4 +1128,3 @@ WWProfileHierarchyInfoClass::~WWProfileHierarchyInfoClass()
 	delete Child;
 	delete Sibling;
 }
-

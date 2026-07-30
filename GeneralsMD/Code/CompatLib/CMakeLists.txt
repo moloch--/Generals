@@ -45,7 +45,10 @@ target_link_libraries(d3dx8 PUBLIC d3d8lib)
 else()
 # Linux only: Create empty d3dx8 stub library to satisfy d3d8lib linkage
 # macOS and Win64 both build real d3dx8 STATIC above; Linux can use the stub for now
-add_library(d3dx8 INTERFACE)
+# GeneralsX @bugfix OpenAI 29/07/2026 Reuse the MinGW d3dx8d alias created during toolchain setup.
+if(NOT TARGET d3dx8)
+    add_library(d3dx8 INTERFACE)
+endif()
 target_link_libraries(d3dx8 INTERFACE d3d8lib)
 endif()
 
@@ -57,11 +60,12 @@ if(SAGE_USE_DX8)
     if(NOT dx8_SOURCE_DIR)
         message(FATAL_ERROR "DirectX 8 SDK (min-dx8-sdk) not fetched! Ensure cmake/dx8.cmake was included")
     endif()
+    # GeneralsX @bugfix OpenAI 29/07/2026 Match min-dx8-sdk's flat header and library layout.
     target_include_directories(d3d8lib INTERFACE
-        ${dx8_SOURCE_DIR}/include
+        ${dx8_SOURCE_DIR}
     )
     target_link_directories(d3d8lib INTERFACE
-        ${dx8_SOURCE_DIR}/lib
+        ${dx8_SOURCE_DIR}
     )
 else()
     # Linux + macOS: Use ONLY DXVK headers (not min-dx8-sdk) to avoid conflicts

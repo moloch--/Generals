@@ -48,8 +48,8 @@
 #include <Utility/intrin_compat.h>
 #include <cstdint>
 
-// GeneralsX @bugfix fbraz 03/02/2026 Use guard macro to prevent typedef conflicts
-#ifndef _INT64_TYPES_DEFINED
+// GeneralsX @bugfix OpenAI 29/07/2026 Keep MinGW's command-line 64-bit compatibility macros intact.
+#if !defined(_WIN32) && !defined(_INT64_TYPES_DEFINED)
 	#define _INT64_TYPES_DEFINED
 	typedef int64_t __int64;
 	typedef int64_t _int64;

@@ -193,12 +193,19 @@ set(GAMEENGINEDEVICE_SRC
 if(WIN32)
     # Windows-specific files (use Windows API for filesystem)
     list(APPEND GAMEENGINEDEVICE_SRC
+        # GeneralsX @bugfix OpenAI 29/07/2026 Restore the native Windows audio and video implementations.
+        Include/MilesAudioDevice/MilesAudioManager.h
+        Include/VideoDevice/Bink/BinkVideoPlayer.h
         Include/Win32Device/Common/Win32LocalFile.h
         Include/Win32Device/Common/Win32LocalFileSystem.h
+        Source/MilesAudioDevice/MilesAudioManager.cpp
+        Source/VideoDevice/Bink/BinkVideoPlayer.cpp
         Source/Win32Device/Common/Win32LocalFile.cpp
         Source/Win32Device/Common/Win32LocalFileSystem.cpp
 #        Source/Win32Device/Common/Win32OSDisplay.cpp
-#        Source/Win32Device/GameClient/Win32DIKeyboard.cpp
+        # GeneralsX @bugfix OpenAI 29/07/2026 Compile the shared Windows input sources after their Core move.
+        Source/Win32Device/GameClient/Win32DIKeyboard.cpp
+        Source/Win32Device/GameClient/Win32Mouse.cpp
     )
 endif()
 

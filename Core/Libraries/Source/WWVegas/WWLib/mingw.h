@@ -32,6 +32,19 @@
 */
 
 #include <math.h>
+#include <cmath>
+
+/*
+**	MinGW hides the MSVC spellings in strict C++ modes. Keep legacy call sites portable
+**	without changing their floating-point behavior.
+*/
+// GeneralsX @bugfix OpenAI 29/07/2026 Map strict-mode MinGW builds to standard NaN/finite checks.
+#ifndef _isnan
+#define _isnan(value) std::isnan(value)
+#endif
+#ifndef _finite
+#define _finite(value) std::isfinite(value)
+#endif
 
 /*
 **	M_1_SQRTPI is not defined by MinGW's math.h

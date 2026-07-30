@@ -1,13 +1,20 @@
 #!/usr/bin/env bash
 # Build GeneralsXZH for Windows using MinGW cross-compiler in Docker
 # Usage: ./scripts/build/linux/docker-build-mingw-zh.sh [preset]
+# Environment: GX_MINGW_JOBS controls build parallelism (default: 8).
 
-set -e
+set -euo pipefail
 
 PRESET="${1:-mingw-w64-i686}"
 LOG_FILE="logs/build_zh_${PRESET}_docker.log"
 DOCKER_IMAGE="generalsx/mingw-builder:latest"
 CONTAINER_NAME="generalsx-build-mingw-zh-${PRESET}"
+BUILD_JOBS="${GX_MINGW_JOBS:-8}"
+
+if [[ ! "$BUILD_JOBS" =~ ^[1-9][0-9]*$ ]]; then
+    echo "ERROR: GX_MINGW_JOBS must be a positive integer" >&2
+    exit 2
+fi
 
 # GeneralsX @build BenderAI 24/03/2026 Preserve host file ownership for bind mounts created by cross-builds.
 HOST_UID="$(id -u)"
@@ -32,7 +39,9 @@ if ! docker image inspect "$DOCKER_IMAGE" &> /dev/null; then
     ./scripts/env/docker/docker-build-images.sh mingw
 fi
 
+# GeneralsX @bugfix OpenAI 29/07/2026 Keep the amd64 MinGW image runnable on Apple Silicon hosts.
 docker run --rm \
+    --platform linux/amd64 \
     --name "$CONTAINER_NAME" \
     --user "${HOST_UID}:${HOST_GID}" \
     -e HOME=/tmp/generalsx-home \
@@ -48,11 +57,14 @@ docker run --rm \
         cmake --preset ${PRESET}
         
         echo '🔨 Building GeneralsXZH (Windows .exe)...'
-        cmake --build build/${PRESET} --target z_generals
+        # GeneralsX @performance OpenAI 29/07/2026 Use bounded parallelism for emulated cross-builds.
+        cmake --build build/${PRESET} --target z_generals --parallel ${BUILD_JOBS}
         
         echo '✅ Build complete!'
-        ls -lh build/${PRESET}/GeneralsMD/GeneralsXZH.exe || echo '⚠️  Binary not found'
+        # GeneralsX @bugfix OpenAI 29/07/2026 Fail when the actual Windows output is missing.
+        test -f build/${PRESET}/GeneralsMD/generalszh.exe
+        ls -lh build/${PRESET}/GeneralsMD/generalszh.exe
     " 2>&1 | tee "$LOG_FILE"
 
 echo "✅ Build complete. Log: $LOG_FILE"
-echo "ℹ️  To test: Run in Windows VM or Wine"
+echo "ℹ️  Cross-compile/link validation only; retail runtime dependencies are not packaged yet."

@@ -43,6 +43,10 @@
 #include "wwdebug.h"
 #include "Vector.h"
 #include "FastAllocator.h"
+#ifndef _WIN32
+// GeneralsX @bugfix OpenAI 29/07/2026 Include the integer thread-ID adapter only on POSIX.
+#include "thread_compat.h"
+#endif
 
 #define USE_FAST_ALLOCATOR
 
@@ -392,8 +396,12 @@ ActiveCategoryStackClass::operator = (const ActiveCategoryStackClass & that)
 ***************************************************************************************************/
 ActiveCategoryStackClass & ActiveCategoryClass::Get_Active_Stack()
 {
-	// GeneralsX @bugfix BenderAI 24/02/2026 Phase 5 - Use GetCurrentThreadIdAsInt for int-based thread tracking
+	// GeneralsX @bugfix OpenAI 29/07/2026 Use the native Windows ID and POSIX integer adapter on their own platforms.
+#ifdef _WIN32
+	int current_thread = static_cast<int>(GetCurrentThreadId());
+#else
 	int current_thread = GetCurrentThreadIdAsInt();
+#endif
 
 	/*
 	** If we already have an allocated category stack for the current thread,

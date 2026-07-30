@@ -42,6 +42,8 @@ FrameGrabClass::FrameGrabClass(const char *filename, MODE mode, int width, int h
 
 	Stream = nullptr;
 	AVIFile = nullptr;
+	// GeneralsX @bugfix OpenAI 29/07/2026 Keep failure cleanup from freeing an uninitialized capture buffer.
+	Bitmap = nullptr;
 
 	if(Mode != AVI) return;
 
@@ -178,7 +180,8 @@ void FrameGrabClass::ConvertFrame(void *BitmapPointer)
 	while(y--) {
 		int x = width;
 		int yoffset = y * width;
-		int yoffset2 = (height - y) * width;
+		// GeneralsX @bugfix OpenAI 29/07/2026 Flip into the valid zero-based destination row.
+		int yoffset2 = (height - y - 1) * width;
 		while(x--) {
 			long *source = &image[yoffset + x];
 			long *dest = &Bitmap[yoffset2 + x];
