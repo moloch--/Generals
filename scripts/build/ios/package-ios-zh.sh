@@ -14,6 +14,9 @@
 # Usage: ./scripts/build/ios/package-ios-zh.sh [--dev] [--install]
 #   --dev      skip bundling the 2.7 GB of game assets (code-only iteration)
 #   --install  install the packaged app to the first connected device
+#
+# Environment:
+#   GX_IOS_MULTICAST=1  Request the Apple-approved multicast entitlement for LAN discovery
 set -euo pipefail
 
 DEV_MODE=0
@@ -34,6 +37,17 @@ DERIVED="${IOS_DIR}/build"
 OUT_DIR="${PROJECT_ROOT}/build/ios-package"
 APP_NAME="GeneralsXZH"
 IDENTITY="${GX_SIGN_IDENTITY:-Apple Development}"
+IOS_MULTICAST="${GX_IOS_MULTICAST:-0}"
+MULTICAST_ENTITLEMENTS_REL="GeneralsXZH-Multicast.entitlements"
+MULTICAST_ENTITLEMENTS="${IOS_DIR}/${MULTICAST_ENTITLEMENTS_REL}"
+
+case "${IOS_MULTICAST}" in
+    0|1) ;;
+    *)
+        echo "ERROR: GX_IOS_MULTICAST must be 0 or 1, got '${IOS_MULTICAST}'" >&2
+        exit 1
+        ;;
+esac
 
 # Signing/bundle identity — override for your own Apple Developer account:
 #   GX_TEAM_ID=ABCDE12345 GX_BUNDLE_ID=com.you.generalszh ./package-ios-zh.sh --install
@@ -51,13 +65,27 @@ fi
 echo "==> Generating Xcode project (xcodegen)"
 (cd "${IOS_DIR}" && xcodegen generate --quiet)
 
+XCODE_SIGNING_ARGS=(
+    "DEVELOPMENT_TEAM=${TEAM_ID}"
+    "PRODUCT_BUNDLE_IDENTIFIER=${BUNDLE_ID}"
+)
+if [[ "${IOS_MULTICAST}" == "1" ]]; then
+    if [[ ! -f "${MULTICAST_ENTITLEMENTS}" ]]; then
+        echo "ERROR: multicast entitlements file not found at ${MULTICAST_ENTITLEMENTS}" >&2
+        exit 1
+    fi
+    # GeneralsX @build Codex 29/07/2026 Opt in only after Apple enables Multicast Networking for this exact App ID.
+    # Apple reference: https://developer.apple.com/documentation/bundleresources/entitlements/com.apple.developer.networking.multicast
+    XCODE_SIGNING_ARGS+=("CODE_SIGN_ENTITLEMENTS=${MULTICAST_ENTITLEMENTS_REL}")
+    echo "==> Requesting the iOS multicast entitlement for ${BUNDLE_ID}"
+fi
+
 echo "==> Building provisioning shell app"
 xcodebuild -project "${IOS_DIR}/${APP_NAME}.xcodeproj" \
     -scheme "${APP_NAME}" -configuration Release \
     -destination 'generic/platform=iOS' \
     -derivedDataPath "${DERIVED}" \
-    DEVELOPMENT_TEAM="${TEAM_ID}" \
-    PRODUCT_BUNDLE_IDENTIFIER="${BUNDLE_ID}" \
+    "${XCODE_SIGNING_ARGS[@]}" \
     -allowProvisioningUpdates build | tail -3
 
 SHELL_APP="${DERIVED}/Build/Products/Release-iphoneos/${APP_NAME}.app"
@@ -174,6 +202,16 @@ install_name_tool -add_rpath "@executable_path/Frameworks" "${APP}/${APP_NAME}" 
 echo "==> Re-signing"
 ENTITLEMENTS="${OUT_DIR}/entitlements.plist"
 codesign -d --entitlements - --xml "${SHELL_APP}" > "${ENTITLEMENTS}" 2>/dev/null
+
+if [[ "${IOS_MULTICAST}" == "1" ]]; then
+    SIGNED_MULTICAST="$(/usr/libexec/PlistBuddy -c "Print :com.apple.developer.networking.multicast" "${ENTITLEMENTS}" 2>/dev/null || true)"
+    if [[ "${SIGNED_MULTICAST}" != "true" ]]; then
+        echo "ERROR: the signed provisioning shell lacks com.apple.developer.networking.multicast." >&2
+        echo "  Request Apple approval, enable Multicast Networking for ${BUNDLE_ID}," >&2
+        echo "  and regenerate its provisioning profile before packaging again." >&2
+        exit 1
+    fi
+fi
 
 for f in "${APP}/Frameworks/"*.dylib; do
     [[ -f "$f" ]] && codesign --force --sign "${IDENTITY}" --timestamp=none "$f"

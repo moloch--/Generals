@@ -255,7 +255,8 @@ void LANAPI::OnGameStart()
 		GameMessage *msg = TheMessageStream->appendMessage( GameMessage::MSG_NEW_GAME );
 		msg->appendIntegerArgument(GAME_LAN);
 
-		TheWritableGlobalData->m_useFpsLimit = false;
+		// GeneralsX @bugfix Codex 29/07/2026 Preserve the configured render cap when a LAN game starts.
+		// Upstream reference: https://github.com/fbraz3/GeneralsX/pull/230
 
 		// Set the seeds
 		InitRandom( m_currentGame->getSeed() );

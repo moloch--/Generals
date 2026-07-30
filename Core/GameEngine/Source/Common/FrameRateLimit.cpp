@@ -49,7 +49,9 @@ Real FrameRateLimit::wait(UnsignedInt maxFps)
 
 	// GeneralsX @bugfix BenderAI 11/05/2026 Validate FPS limit to prevent division by zero and underflow
 	// Skip limiting if maxFps is 0 or extremely high (uncapped mode)
-	if (maxFps == 0 || maxFps > 1000000)
+	// GeneralsX @bugfix Codex 29/07/2026 Treat the UncappedFpsValue sentinel itself as uncapped.
+	// Upstream reference: https://github.com/fbraz3/GeneralsX/commit/0cf00e606c8b10a95d59b377b445d932a5f9b87e
+	if (maxFps == 0 || maxFps >= 1000000)
 	{
 		// Uncapped or invalid: just return elapsed time without limiting
 #ifdef _WIN32

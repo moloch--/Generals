@@ -857,7 +857,8 @@ void GameSpyStagingRoom::launchGame()
 	GameMessage *msg = TheMessageStream->appendMessage( GameMessage::MSG_NEW_GAME );
 	msg->appendIntegerArgument(GAME_INTERNET);
 
-	TheWritableGlobalData->m_useFpsLimit = false;
+	// GeneralsX @bugfix Codex 29/07/2026 Preserve the configured render cap when an online game starts.
+	// Upstream reference: https://github.com/fbraz3/GeneralsX/pull/230
 
 	// Set the seeds
 	InitRandom( getSeed() );

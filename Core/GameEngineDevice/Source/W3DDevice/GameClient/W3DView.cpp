@@ -163,6 +163,9 @@ W3DView::W3DView()
 
 	m_3DCamera = nullptr;
 	m_2DCamera = nullptr;
+	// GeneralsX @bugfix Codex 29/07/2026 Initialize the view multiplier so garbage state cannot bypass frame limiting.
+	// Upstream reference: https://github.com/fbraz3/GeneralsX/commit/0cf00e606c8b10a95d59b377b445d932a5f9b87e
+	m_timeMultiplier = 1;
 
 #if PRESERVE_RETAIL_SCRIPTED_CAMERA
 	m_initialGroundLevel = 10.0f;

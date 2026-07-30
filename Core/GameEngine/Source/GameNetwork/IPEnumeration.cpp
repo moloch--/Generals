@@ -32,6 +32,7 @@
 #include <errno.h>
 #include <ifaddrs.h>
 #include <net/if.h>
+#include <string.h>
 #endif
 
 IPEnumeration::IPEnumeration()
@@ -112,10 +113,37 @@ EnumeratedIP * IPEnumeration::getAddresses()
 				continue;
 			}
 
+			// GeneralsX @bugfix Codex 29/07/2026 Only offer broadcast-capable LAN interfaces; reject cellular and VPN links.
+			// Upstream references: https://github.com/fbraz3/GeneralsX/pull/201
+			// and https://github.com/ammaarreshi/Generals-Mac-iOS-iPad/pull/13
+			if ((ifa->ifa_flags & IFF_BROADCAST) == 0 || (ifa->ifa_flags & IFF_POINTOPOINT) != 0)
+			{
+				continue;
+			}
+
+			// Reject known virtual adapters without excluding bridge100, which iOS uses for Personal Hotspot.
+			if (ifa->ifa_name != nullptr)
+			{
+				const char *name = ifa->ifa_name;
+				if (strncmp(name, "docker", 6) == 0 ||
+					strncmp(name, "veth", 4) == 0 ||
+					strncmp(name, "virbr", 5) == 0 ||
+					strncmp(name, "awdl", 4) == 0 ||
+					strncmp(name, "llw", 3) == 0 ||
+					strncmp(name, "utun", 4) == 0)
+				{
+					continue;
+				}
+			}
+
 			const sockaddr_in *addr = reinterpret_cast<const sockaddr_in *>(ifa->ifa_addr);
 			// GeneralsX @bugfix BenderAI 31/03/2026 Use ntohl to convert from network byte order before extracting octets;
 			// reading s_addr byte-by-byte on little-endian platforms reverses the IPv4 octets.
 			const UnsignedInt hostAddr = ntohl(addr->sin_addr.s_addr);
+			if ((hostAddr & 0xFFFF0000u) == 0xA9FE0000u)
+			{
+				continue;
+			}
 			addNewIP(
 				(UnsignedByte)((hostAddr >> 24) & 0xFF),
 				(UnsignedByte)((hostAddr >> 16) & 0xFF),
@@ -124,10 +152,9 @@ EnumeratedIP * IPEnumeration::getAddresses()
 		}
 		freeifaddrs(ifaddr);
 
-		if (m_IPlist)
-		{
-			return m_IPlist;
-		}
+		// GeneralsX @bugfix Codex 29/07/2026 Do not reintroduce filtered loopback or virtual addresses via hostname lookup.
+		// Upstream context: https://github.com/fbraz3/GeneralsX/pull/201
+		return m_IPlist;
 	}
 	else
 	{
@@ -250,5 +277,3 @@ AsciiString IPEnumeration::getMachineName()
 
 	return AsciiString(hostname);
 }
-
-

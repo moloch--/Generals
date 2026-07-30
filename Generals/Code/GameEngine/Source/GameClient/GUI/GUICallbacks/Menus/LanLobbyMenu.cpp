@@ -416,30 +416,37 @@ void LanLobbyMenuInit( WindowLayout *layout, void *userData )
 	}
 
 	// Choose an IP address, then initialize the LAN singleton
-	UnsignedInt IP = TheGlobalData->m_defaultIP;
 	IPEnumeration IPs;
+	EnumeratedIP *IPlist = IPs.getAddresses();
+	OptionPreferences optionPrefs;
+	const UnsignedInt configuredIP = optionPrefs.getLANIPAddress();
+	UnsignedInt IP = 0;
 	const WideChar* IPSource;
-	if (!IP)
-	{
-		EnumeratedIP *IPlist = IPs.getAddresses();
-		/*
-		while (IPlist && IPlist->getNext())
-		{
-			IPlist = IPlist->getNext();
-		}
-		*/
-		DEBUG_ASSERTCRASH(IPlist, ("No IP addresses found!"));
-		if (!IPlist)
-		{
-			/// @todo: display error and exit lan lobby if no IPs are found
-		}
 
-		IPSource = L"Local IP chosen";
+	for (EnumeratedIP *candidate = IPlist; candidate != nullptr; candidate = candidate->getNext())
+	{
+		if (candidate->getIP() == configuredIP)
+		{
+			IP = configuredIP;
+			break;
+		}
+	}
+
+	// GeneralsX @bugfix Codex 29/07/2026 Validate saved LAN preferences against the current filtered interface list.
+	// Upstream reference: https://github.com/fbraz3/GeneralsX/pull/181
+	if (IP != 0)
+	{
+		IPSource = L"Configured local IP";
+	}
+	else if (IPlist != nullptr)
+	{
 		IP = IPlist->getIP();
+		IPSource = L"Local IP chosen";
 	}
 	else
 	{
-		IPSource = L"Default local IP";
+		IPSource = L"No LAN IP available";
+		LANSocketErrorDetected = TRUE;
 	}
 #if defined(RTS_DEBUG)
 	UnicodeString str;
@@ -449,7 +456,7 @@ void LanLobbyMenuInit( WindowLayout *layout, void *userData )
 
 	// TheLAN->init() sets us to be in a LAN menu screen automatically.
 	TheLAN->init();
-	if (TheLAN->SetLocalIP(IP) == FALSE) {
+	if (IP == 0 || TheLAN->SetLocalIP(IP) == FALSE) {
 		LANSocketErrorDetected = TRUE;
 	}
 
@@ -468,8 +475,11 @@ void LanLobbyMenuInit( WindowLayout *layout, void *userData )
 	GadgetListBoxReset(listboxGames);
 
 	defaultName.truncateTo(g_lanPlayerNameLength);
-	TheLAN->RequestSetName(defaultName);
-	TheLAN->RequestLocations();
+	if (!LANSocketErrorDetected)
+	{
+		TheLAN->RequestSetName(defaultName);
+		TheLAN->RequestLocations();
+	}
 
 	/*
 	UnicodeString unicodeChat;

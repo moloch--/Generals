@@ -443,8 +443,9 @@ void LANAPI::handleRequestJoin( LANMessage *msg, UnsignedInt senderIP )
 					DEBUG_LOG(("LANAPI::handleRequestJoin - added player %ls at ip 0x%08x to the game", msg->name, senderIP));
 
 					// GeneralsX @bugfix BenderAI 13/02/2026 Wrap WideCharWindows with GetWindowsWideCharAsWchar (fighter19 pattern)
+					// GeneralsX @bugfix Codex 29/07/2026 Keep the join response unicast to the requesting peer.
+					// Upstream reference: https://github.com/fbraz3/GeneralsX/pull/181
 					OnPlayerJoin(player, UnicodeString(GetWindowsWideCharAsWchar(msg->name)));
-					responseIP = 0;
 
 					break;
 				}

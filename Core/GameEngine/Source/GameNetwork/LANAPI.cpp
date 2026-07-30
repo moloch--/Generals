@@ -34,14 +34,128 @@
 #include "Common/GlobalData.h"
 #include "Common/RandomValue.h"
 #include "GameClient/GameText.h"
+#include "GameClient/ClientInstance.h"
 #include "GameClient/MapUtil.h"
 #include "Common/UserPreferences.h"
 #include "GameLogic/GameLogic.h"
 
+#ifndef _WIN32
+#include <ifaddrs.h>
+#include <net/if.h>
+#include <string.h>
+#endif
 
 static const UnsignedShort lobbyPort = 8086; ///< This is the UDP port used by all LANAPI communication
 
 AsciiString GetMessageTypeString(UnsignedInt type);
+
+#ifndef _WIN32
+// GeneralsX @bugfix Codex 29/07/2026 Route LAN broadcasts through the selected POSIX interface.
+// Upstream reference: https://github.com/fbraz3/GeneralsX/pull/181
+static Int GatherSubnetBroadcastAddrs(UnsignedInt localIP, UnsignedInt *outAddrs, Int maxAddrs)
+{
+	if (outAddrs == nullptr || maxAddrs <= 0)
+	{
+		return 0;
+	}
+
+	struct ifaddrs *ifaddr = nullptr;
+	if (getifaddrs(&ifaddr) != 0)
+	{
+		return 0;
+	}
+
+	Int count = 0;
+	for (struct ifaddrs *ifa = ifaddr; ifa != nullptr; ifa = ifa->ifa_next)
+	{
+		if (ifa->ifa_addr == nullptr || ifa->ifa_addr->sa_family != AF_INET)
+		{
+			continue;
+		}
+
+		if ((ifa->ifa_flags & IFF_UP) == 0 ||
+			(ifa->ifa_flags & IFF_LOOPBACK) != 0 ||
+			(ifa->ifa_flags & IFF_BROADCAST) == 0 ||
+			(ifa->ifa_flags & IFF_POINTOPOINT) != 0)
+		{
+			continue;
+		}
+
+		if (ifa->ifa_name != nullptr)
+		{
+			const char *name = ifa->ifa_name;
+			if (strncmp(name, "docker", 6) == 0 ||
+				strncmp(name, "veth", 4) == 0 ||
+				strncmp(name, "virbr", 5) == 0 ||
+				strncmp(name, "awdl", 4) == 0 ||
+				strncmp(name, "llw", 3) == 0 ||
+				strncmp(name, "utun", 4) == 0)
+			{
+				continue;
+			}
+		}
+
+		const sockaddr_in *addr = reinterpret_cast<const sockaddr_in *>(ifa->ifa_addr);
+		const UnsignedInt hostAddr = ntohl(addr->sin_addr.s_addr);
+		if ((hostAddr & 0xFFFF0000u) == 0xA9FE0000u || (localIP != 0 && hostAddr != localIP))
+		{
+			continue;
+		}
+
+		UnsignedInt broadcastAddr = 0;
+		if (ifa->ifa_broadaddr != nullptr && ifa->ifa_broadaddr->sa_family == AF_INET)
+		{
+			const sockaddr_in *broadcast = reinterpret_cast<const sockaddr_in *>(ifa->ifa_broadaddr);
+			broadcastAddr = ntohl(broadcast->sin_addr.s_addr);
+		}
+		else if (ifa->ifa_netmask != nullptr && ifa->ifa_netmask->sa_family == AF_INET)
+		{
+			const sockaddr_in *netmask = reinterpret_cast<const sockaddr_in *>(ifa->ifa_netmask);
+			const UnsignedInt mask = ntohl(netmask->sin_addr.s_addr);
+			broadcastAddr = (hostAddr & mask) | ~mask;
+		}
+
+		Bool duplicate = FALSE;
+		for (Int i = 0; i < count; ++i)
+		{
+			if (outAddrs[i] == broadcastAddr)
+			{
+				duplicate = TRUE;
+				break;
+			}
+		}
+
+		if (broadcastAddr != 0 && !duplicate && count < maxAddrs)
+		{
+			outAddrs[count++] = broadcastAddr;
+		}
+	}
+
+	freeifaddrs(ifaddr);
+	return count;
+}
+
+static UnsignedInt GetLanBindAddress(UnsignedInt localIP)
+{
+	if (!rts::ClientInstance::isMultiInstance())
+	{
+		return INADDR_ANY;
+	}
+
+	// Multi-instance mode assigns each process a distinct 127.x address and therefore cannot share INADDR_ANY:8086.
+	if (localIP != 0)
+	{
+		return localIP;
+	}
+
+	const UnsignedInt id = rts::ClientInstance::getInstanceId();
+	return AssembleIp(
+		127,
+		(UnsignedByte)(id >> 16),
+		(UnsignedByte)(id >> 8),
+		(UnsignedByte)id);
+}
+#endif
 
 const UnsignedInt LANAPI::s_resendDelta = 10 * 1000;	///< This is how often we announce ourselves to the world
 /*
@@ -100,7 +214,13 @@ void LANAPI::init()
 	m_gameStartTime = 0;
 	m_gameStartSeconds = 0;
 	m_transport->reset();
+#ifdef _WIN32
 	m_transport->init(m_localIP, lobbyPort);
+#else
+	// GeneralsX @bugfix Codex 29/07/2026 Receive POSIX LAN broadcasts on every interface while retaining m_localIP as identity.
+	// Upstream reference: https://github.com/fbraz3/GeneralsX/pull/201
+	m_transport->init(GetLanBindAddress(m_localIP), lobbyPort);
+#endif
 	m_transport->allowBroadcasts(true);
 
 	m_pendingAction = ACT_NONE;
@@ -181,24 +301,64 @@ void LANAPI::reset()
 
 void LANAPI::sendMessage(LANMessage *msg, UnsignedInt ip /* = 0 */)
 {
+	if (msg == nullptr)
+	{
+		return;
+	}
+
 	if (ip != 0)
 	{
 		m_transport->queueSend(ip, lobbyPort, (unsigned char *)msg, sizeof(LANMessage) /*, 0, 0 */);
+		return;
 	}
-	else if ((m_currentGame != nullptr) && (m_currentGame->getIsDirectConnect()))
+
+	// GeneralsX @bugfix Codex 29/07/2026 Unicast post-join control traffic to each peer instead of relying on broadcasts.
+	// Upstream reference: https://github.com/fbraz3/GeneralsX/pull/181
+	const Bool shouldUseDirectedFanout = (m_currentGame != nullptr)
+		&& (m_currentGame->getIsDirectConnect()
+			|| (!m_inLobby
+				&& (msg->messageType == LANMessage::MSG_GAME_OPTIONS
+					|| msg->messageType == LANMessage::MSG_GAME_START
+					|| msg->messageType == LANMessage::MSG_GAME_START_TIMER
+					|| msg->messageType == LANMessage::MSG_REQUEST_GAME_LEAVE
+					|| msg->messageType == LANMessage::MSG_SET_ACCEPT
+					|| msg->messageType == LANMessage::MSG_MAP_AVAILABILITY
+					|| msg->messageType == LANMessage::MSG_CHAT
+					|| msg->messageType == LANMessage::MSG_INACTIVE)));
+
+	if (shouldUseDirectedFanout)
 	{
 		Int localSlot = m_currentGame->getLocalSlotNum();
+		Bool sentAny = FALSE;
 		for (Int i = 0; i < MAX_SLOTS; ++i)
 		{
 			if (i != localSlot) {
 				GameSlot *slot = m_currentGame->getSlot(i);
-				if ((slot != nullptr) && (slot->isHuman())) {
-					m_transport->queueSend(slot->getIP(), lobbyPort, (unsigned char *)msg, sizeof(LANMessage) /*, 0, 0 */);
+				if ((slot != nullptr) && slot->isHuman() && slot->getIP() != 0) {
+					sentAny = m_transport->queueSend(
+						slot->getIP(), lobbyPort, (unsigned char *)msg, sizeof(LANMessage) /*, 0, 0 */) || sentAny;
 				}
 			}
 		}
+
+		if (sentAny)
+		{
+			return;
+		}
 	}
-	else
+
+	Bool sentAny = FALSE;
+#ifndef _WIN32
+	UnsignedInt subnetBroadcasts[8];
+	const Int subnetCount = GatherSubnetBroadcastAddrs(m_localIP, subnetBroadcasts, ARRAY_SIZE(subnetBroadcasts));
+	for (Int i = 0; i < subnetCount; ++i)
+	{
+		sentAny = m_transport->queueSend(
+			subnetBroadcasts[i], lobbyPort, (unsigned char *)msg, sizeof(LANMessage) /*, 0, 0 */) || sentAny;
+	}
+#endif
+
+	if (!sentAny)
 	{
 		m_transport->queueSend(m_broadcastAddr, lobbyPort, (unsigned char *)msg, sizeof(LANMessage) /*, 0, 0 */);
 	}
@@ -1275,7 +1435,13 @@ Bool LANAPI::SetLocalIP( UnsignedInt localIP )
 	m_localIP = localIP;
 
 	m_transport->reset();
+#ifdef _WIN32
 	retval = m_transport->init(m_localIP, lobbyPort);
+#else
+	// GeneralsX @bugfix Codex 29/07/2026 Rebind the POSIX receiver to all interfaces after LAN IP selection.
+	// Upstream reference: https://github.com/fbraz3/GeneralsX/pull/201
+	retval = m_transport->init(GetLanBindAddress(m_localIP), lobbyPort);
+#endif
 	m_transport->allowBroadcasts(true);
 
 	return retval;

@@ -116,12 +116,13 @@ AsciiString GetWSAErrorString( Int error )
 
 UDP::UDP()
 {
-  fd=0;
+  fd=-1;
+  m_lastError=0;
 }
 
 UDP::~UDP()
 {
-	if (fd)
+	if (fd != -1)
 		closesocket(fd);
 }
 
@@ -147,6 +148,14 @@ Int UDP::Bind(UnsignedInt IP,UnsignedShort Port)
   int retval;
   int status;
 
+  // GeneralsX @bugfix Codex 29/07/2026 Close a failed retry socket before creating its replacement.
+  // Upstream context: https://github.com/fbraz3/GeneralsX/pull/181
+  if (fd != -1)
+  {
+    closesocket(fd);
+    fd=-1;
+  }
+
   IP=htonl(IP);
   Port=htons(Port);
 
@@ -159,20 +168,25 @@ Int UDP::Bind(UnsignedInt IP,UnsignedShort Port)
     fd=-1;
   #endif
   if (fd==-1)
+  {
+    m_lastError = WSAGetLastError();
     return(UNKNOWN);
+  }
 
   retval=bind(fd,(struct sockaddr *)&addr,sizeof(addr));
 
-  #ifdef _WIN32
+  // GeneralsX @bugfix Codex 29/07/2026 Apply socket error handling on POSIX as well as Winsock.
+  // Upstream reference: https://github.com/fbraz3/GeneralsX/pull/181
   if (retval==SOCKET_ERROR)
 	{
     retval=-1;
 		m_lastError = WSAGetLastError();
 	}
-  #endif
   if (retval==-1)
   {
     status=GetStatus();
+    closesocket(fd);
+    fd=-1;
     //CERR("Bind failure (" << status << ") IP " << IP << " PORT " << Port )
     return(status);
   }
@@ -240,7 +254,8 @@ Int UDP::Write(const unsigned char *msg,UnsignedInt len,UnsignedInt IP,UnsignedS
 
   ClearStatus();
   retval=sendto(fd,(const char *)msg,len,0,(struct sockaddr *)&to,sizeof(to));
-  #ifdef _WIN32
+  // GeneralsX @bugfix Codex 29/07/2026 Normalize POSIX send errors before Transport processes them.
+  // Upstream reference: https://github.com/fbraz3/GeneralsX/pull/181
   if (retval==SOCKET_ERROR)
 	{
     retval=-1;
@@ -250,7 +265,6 @@ Int UDP::Write(const unsigned char *msg,UnsignedInt len,UnsignedInt IP,UnsignedS
 #endif
 		DEBUG_ASSERTLOG(errCount++ > 100, ("UDP::Write() - WSA error is %s", GetWSAErrorString(WSAGetLastError()).str()));
 	}
-  #endif
 
   return(retval);
 }
@@ -264,7 +278,8 @@ Int UDP::Read(unsigned char *msg,UnsignedInt len,sockaddr_in *from)
   if (from!=nullptr)
   {
     retval=recvfrom(fd,(char *)msg,len,0,(struct sockaddr *)from,&alen);
-    #ifdef _WIN32
+    // GeneralsX @bugfix Codex 29/07/2026 Normalize POSIX receive errors and nonblocking status.
+    // Upstream reference: https://github.com/fbraz3/GeneralsX/pull/181
     if (retval == SOCKET_ERROR)
 		{
 			if (WSAGetLastError() != WSAEWOULDBLOCK)
@@ -280,12 +295,10 @@ Int UDP::Read(unsigned char *msg,UnsignedInt len,sockaddr_in *from)
 				retval = 0;
 			}
 		}
-    #endif
   }
   else
   {
     retval=recvfrom(fd,(char *)msg,len,0,nullptr,nullptr);
-    #ifdef _WIN32
     if (retval==SOCKET_ERROR)
 		{
 			if (WSAGetLastError() != WSAEWOULDBLOCK)
@@ -301,7 +314,6 @@ Int UDP::Read(unsigned char *msg,UnsignedInt len,sockaddr_in *from)
 				retval = 0;
 			}
 		}
-    #endif
   }
   return(retval);
 }
@@ -340,6 +352,10 @@ UDP::sockStat UDP::GetStatus()
       return TIMEDOUT;
     case WSAEALREADY:
       return ALREADY;
+    case WSAEADDRINUSE:
+      return ADDRINUSE;
+    case WSAEADDRNOTAVAIL:
+      return ADDRNOTAVAIL;
     case WSAEWOULDBLOCK:
       return WOULDBLOCK;
     case WSAEBADF:
@@ -368,6 +384,14 @@ UDP::sockStat UDP::GetStatus()
       return TIMEDOUT;
     case EALREADY:
       return ALREADY;
+    // GeneralsX @bugfix Codex 29/07/2026 Preserve actionable POSIX socket statuses for Transport.
+    // Upstream context: https://github.com/fbraz3/GeneralsX/pull/181
+    case EADDRINUSE:
+      return ADDRINUSE;
+    case EADDRNOTAVAIL:
+      return ADDRNOTAVAIL;
+    case EPIPE:
+      return PIPE;
     case EAGAIN:
       return AGAIN;
     // GeneralsX @bugfix BenderAI 13/02/2026 EWOULDBLOCK == EAGAIN on Linux (duplicate case)
