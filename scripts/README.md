@@ -9,18 +9,21 @@ This folder is organized by function for easier maintenance and discovery.
 #### `build/linux/` - Linux & Docker Build
 Scripts for Linux native and Docker-based builds:
 - `build-linux-appimage-generals.sh` - Package GeneralsX as AppImage (portable single-file Linux distribution)
+- `build-sfx-linux-zh.sh` - Build one local Linux/AMD64 SFX, validate its ELF closure, and inventory owned Zero Hour assets
 - `docker-configure-linux.sh` - Configure CMake for Linux build
 - `docker-build-linux-zh.sh` - Build GeneralsXZH (Zero Hour) for Linux
 - `docker-build-linux-generals.sh` - Build GeneralsX (base game) for Linux
 - `docker-build-mingw-zh.sh` - Cross-compile Windows .exe via MinGW in Docker
 - `build-linux-appimage-zh.sh` - Package GeneralsXZH as AppImage (portable single-file Linux distribution)
-- `bundle-linux-zh.sh` - Bundle compiled binaries
+- `bundle-linux-zh.sh` - Bundle compiled binaries and their complete Linux/AMD64 dependency closure
 - `deploy-linux-zh.sh` - Deploy to runtime directory
 - `run-linux-zh.sh` - Launch the game windowed
 
 #### `build/macos/` - macOS Build
 - `build-macos-zh.sh` - Configure + build GeneralsXZH
 - `build-macos-generals.sh` - Configure + build GeneralsX
+- `build-sfx-macos-zh.sh` - Build one local macOS/ARM64 SFX and a signed Finder-launchable `.app`, validate its Mach-O closure, and inventory owned Zero Hour assets
+- `package-sfx-macos-zh-app.sh` - Wrap an existing macOS/ARM64 SFX in a signed `.app` with a complete Retina `.icns` icon
 - `bundle-macos-zh.sh` - Bundle app
 - `bundle-macos-generals.sh` - Bundle app
 - `deploy-macos-zh.sh` - Deploy binaries
@@ -55,6 +58,14 @@ Utilities for large-scale code refactoring and fixes:
 - `*_refactor_*.py` - Code transformation scripts (string classes, etc.)
 - `remove_*.py` / `replace_*.py` - Include guard and pragma cleanup
 - `unify_move_files.py` - Move files between Generals/GeneralsMD/Core with CMakeLists.txt updates
+
+#### `tooling/sfx/` - Self-Extracting Game Packaging
+- `cmd/generalsx-sfx-pack/` - Deterministically pack a target-native runtime and owned retail assets
+- `cmd/generalsx-sfx/` - Verify, cache, and launch the embedded native game
+- `profiles/` - Target-specific staging exclusions
+
+See the [SFX tooling reference](tooling/sfx/README.md) and
+[self-extracting game HOWTO](../docs/HOWTO/BUILD_SELF_EXTRACTING_GAME.md).
 
 ### `qa/` - Quality Assurance & Testing
 
@@ -132,6 +143,19 @@ CNC_GENERALS_PATH="/path/to/Generals" \
 ./scripts/build/macos/run-macos-zh.sh -win
 ```
 
+To package the native game and a locally owned retail-data tree into one
+macOS/ARM64 executable and a Finder-launchable app:
+
+```bash
+GX_SFX_ASSET_DIR="${HOME}/GeneralsX/GeneralsZH" \
+  ./scripts/build/macos/build-sfx-macos-zh.sh
+```
+
+The outputs are `build/sfx/GeneralsXZH-macos-arm64-sfx` and
+`build/sfx/GeneralsXZH.app`. Both contain copyrighted retail data. Keep them
+local unless you have redistribution rights. See
+[Build and Run a Self-Extracting GeneralsXZH Executable](../docs/HOWTO/BUILD_SELF_EXTRACTING_GAME.md).
+
 ### Windows Cross-Compile (from Linux/macOS)
 
 ```bash
@@ -142,9 +166,9 @@ CNC_GENERALS_PATH="/path/to/Generals" \
 ```
 
 This exploratory target currently validates 32-bit Windows cross-compilation
-only. The executable still needs retail-compatible Bink/Miles import
-decoration and a replacement for its `d3dx8d.dll` dependency before it is
-runtime-ready.
+only. The generated Bink/Miles DLLs export the imported names but deliberately
+provide null implementations, compatibility with retail DLLs is unvalidated,
+and `d3dx8d.dll` is still missing. The target is not runtime-ready.
 
 ---
 

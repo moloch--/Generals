@@ -1,0 +1,32 @@
+# GeneralsX @build moloch 30/07/2026 Exclude installer and mutable files from a future Windows runtime payload.
+#
+# Windows packaging is currently experimental because the game binary still
+# has unresolved D3DX, Bink, and Miles runtime dependencies.
+
+_CommonRedist/
+Manuals/
+RedistInstallers/
+steamapps/
+
+GeneralsXZH.dxvk-cache
+GeneralsXZH_d3d9.log
+gp.info
+id.bin
+gstats.dat
+run.sh
+*.dylib
+*.so
+*.so.*
+MoltenVK_icd.json
+fontconfig/
+
+Patch.doc
+readme.doc
+installScript.vdf
+launcher.bmp
+Install_Final.bmp
+Generals.ico
+GeneralsZH.ico
+Launcher.txt
+steam_appid.txt
+*.acf

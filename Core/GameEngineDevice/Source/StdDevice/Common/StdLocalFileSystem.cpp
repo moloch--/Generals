@@ -33,6 +33,7 @@
 #include "StdDevice/Common/StdLocalFile.h"
 
 #include <algorithm>
+#include <cstdlib>
 #include <filesystem>
 
 #ifndef _WIN32
@@ -41,6 +42,85 @@
 // The StdBIGFileSystem sets this after resolving the primary asset directory so that relative paths like
 // "Data\Scripts\SkirmishScripts.scb" can be found in the asset root when the cwd lookup fails.
 static std::filesystem::path s_assetFallbackPath;
+
+// GeneralsX @feature moloch 30/07/2026 Keep SFX payload reads immutable while routing relative writes to private state.
+static std::filesystem::path getSFXRuntimeStatePath()
+{
+	const char *statePath = std::getenv("GENERALSX_SFX_RUNTIME_STATE");
+	if (statePath == nullptr || statePath[0] == '\0') {
+		return std::filesystem::path();
+	}
+
+	std::filesystem::path path(statePath);
+	if (!path.is_absolute()) {
+		return std::filesystem::path();
+	}
+	return path.lexically_normal();
+}
+
+static bool isSafeSFXRelativePath(const std::filesystem::path& path)
+{
+	if (path.empty() || path.is_absolute()) {
+		return false;
+	}
+	for (const auto& component : path.lexically_normal()) {
+		if (component == "..") {
+			return false;
+		}
+	}
+	return true;
+}
+
+static std::filesystem::path findSFXAssetPath(const std::filesystem::path& relativePath)
+{
+	if (s_assetFallbackPath.empty() || !isSafeSFXRelativePath(relativePath)) {
+		return std::filesystem::path();
+	}
+
+	std::error_code ec;
+	std::filesystem::path candidate = s_assetFallbackPath / relativePath.lexically_normal();
+	if (std::filesystem::exists(candidate, ec) && !ec) {
+		return candidate;
+	}
+
+#ifdef __linux__
+	// Retail paths are historically case-insensitive. Resolve each component
+	// without ever consulting the writable SFX process directory.
+	std::filesystem::path current = s_assetFallbackPath;
+	for (const auto& component : relativePath.lexically_normal()) {
+		if (component == ".") {
+			continue;
+		}
+
+		std::filesystem::path direct = current / component;
+		ec.clear();
+		if (std::filesystem::exists(direct, ec) && !ec) {
+			current = direct;
+			continue;
+		}
+
+		bool found = false;
+		ec.clear();
+		for (const auto& entry : std::filesystem::directory_iterator(current, ec)) {
+			if (strcasecmp(entry.path().filename().string().c_str(), component.string().c_str()) == 0) {
+				current /= entry.path().filename();
+				found = true;
+				break;
+			}
+		}
+		if (ec || !found) {
+			return std::filesystem::path();
+		}
+	}
+
+	ec.clear();
+	if (std::filesystem::exists(current, ec) && !ec) {
+		return current;
+	}
+#endif
+
+	return std::filesystem::path();
+}
 #endif
 
 StdLocalFileSystem::StdLocalFileSystem() : LocalFileSystem()
@@ -64,6 +144,21 @@ static std::filesystem::path fixFilenameFromWindowsPath(const Char *filename, In
 	std::filesystem::path path(std::move(fixedFilename));
 
 #ifndef _WIN32
+	const std::filesystem::path sfxRuntimeStatePath = getSFXRuntimeStatePath();
+	if (!sfxRuntimeStatePath.empty() && path.is_relative()) {
+		if (!isSafeSFXRelativePath(path)) {
+			return std::filesystem::path();
+		}
+		if (access & File::WRITE) {
+			return sfxRuntimeStatePath / path.lexically_normal();
+		}
+
+		// Never let persistent writable state shadow a loose or BIG-file
+		// asset. A miss returns no local file so the archive filesystem can
+		// continue its normal lookup.
+		return findSFXAssetPath(path);
+	}
+
 	// check if the file exists to see if fixup is required
 	// if it's not found try to match disregarding case sensitivity
 	// For cases where a write is happening, we should check if the parent path exists, if so, let it through, since the file may not exist yet.
@@ -294,6 +389,17 @@ void StdLocalFileSystem::getFileListInDirectory(const AsciiString& currentDirect
 #ifndef _WIN32
 	// Replace backslashes with forward slashes on unix
 	std::replace(fixedDirectory.begin(), fixedDirectory.end(), '\\', '/');
+	std::filesystem::path directoryPath(fixedDirectory);
+	const std::filesystem::path sfxRuntimeStatePath = getSFXRuntimeStatePath();
+	bool sfxAssetEnumeration = false;
+	if (!sfxRuntimeStatePath.empty() && directoryPath.is_relative()) {
+		directoryPath = findSFXAssetPath(directoryPath);
+		if (directoryPath.empty()) {
+			return;
+		}
+		fixedDirectory = directoryPath.string();
+		sfxAssetEnumeration = true;
+	}
 #endif
 
 	Bool done = FALSE;
@@ -314,7 +420,21 @@ void StdLocalFileSystem::getFileListInDirectory(const AsciiString& currentDirect
 			(strcmp(filenameStr.c_str(), ".") != 0 && strcmp(filenameStr.c_str(), "..") != 0)) {
 			// if we haven't already, add this filename to the list.
 			// a stl set should only allow one copy of each filename
-			AsciiString newFilename = iter->path().string().c_str();
+			std::filesystem::path resultPath = iter->path();
+#ifndef _WIN32
+			if (sfxAssetEnumeration) {
+				// Enumeration happens against the absolute immutable asset
+				// root, but callers and the BIG filesystem expect paths
+				// relative to that root.
+				resultPath = resultPath.lexically_relative(s_assetFallbackPath);
+				if (!isSafeSFXRelativePath(resultPath)) {
+					iter++;
+					done = iter == std::filesystem::directory_iterator();
+					continue;
+				}
+			}
+#endif
+			AsciiString newFilename = resultPath.string().c_str();
 			if (filenameList.find(newFilename) == filenameList.end()) {
 				filenameList.insert(newFilename);
 			}
@@ -339,7 +459,15 @@ void StdLocalFileSystem::getFileListInDirectory(const AsciiString& currentDirect
 			std::string filenameStr = iter->path().filename().string();
 			if(iter->is_directory() &&
 				(strcmp(filenameStr.c_str(), ".") != 0 && strcmp(filenameStr.c_str(), "..") != 0)) {
-				AsciiString tempsearchstr(filenameStr.c_str());
+				// GeneralsX @bugfix moloch 30/07/2026 Preserve the accumulated path during recursive loose-file enumeration.
+				AsciiString tempsearchstr(currentDirectory);
+				if (!tempsearchstr.isEmpty() &&
+					!tempsearchstr.endsWith("/") &&
+					!tempsearchstr.endsWith("\\")) {
+					tempsearchstr.concat('/');
+				}
+				tempsearchstr.concat(filenameStr.c_str());
+				tempsearchstr.concat('/');
 
 				// recursively add files in subdirectories if required.
 				getFileListInDirectory(tempsearchstr, originalDirectory, searchName, filenameList, searchSubdirectories);
@@ -396,6 +524,16 @@ Bool StdLocalFileSystem::createDirectory(AsciiString directory)
 	if ((!fixedDirectory.empty()) && (fixedDirectory.length() < _MAX_DIR)) {
 		// Convert to host path
 		std::filesystem::path path(std::move(fixedDirectory));
+
+#ifndef _WIN32
+		const std::filesystem::path sfxRuntimeStatePath = getSFXRuntimeStatePath();
+		if (!sfxRuntimeStatePath.empty() && path.is_relative()) {
+			if (!isSafeSFXRelativePath(path)) {
+				return FALSE;
+			}
+			path = sfxRuntimeStatePath / path.lexically_normal();
+		}
+#endif
 
 		std::error_code ec;
 		result = std::filesystem::create_directory(path, ec);

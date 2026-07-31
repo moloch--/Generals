@@ -99,6 +99,32 @@ resolve_dep_path() {
     return 1
 }
 
+stage_external_dylib() {
+    local source="$1"
+    local destination="$2"
+    local leaf
+
+    leaf="$(basename -- "${destination}")"
+    if [[ -e "${destination}" || -L "${destination}" ]]; then
+        if [[ ! -f "${destination}" ]]; then
+            echo "ERROR: External dylib destination is not a regular file: ${destination}" >&2
+            return 1
+        fi
+        if ! cmp -s -- "${source}" "${destination}"; then
+            echo "ERROR: Conflicting external dylibs flatten to ${leaf}:" >&2
+            echo "  existing: ${destination}" >&2
+            echo "  resolved: ${source}" >&2
+            return 1
+        fi
+        return 0
+    fi
+
+    echo "  + external ${leaf} (from ${source})"
+    # GeneralsX @bugfix Copilot 20/03/2026 Dereference symlinks so we copy the
+    # actual dylib, not a dangling symlink.
+    cp -L -- "${source}" "${destination}"
+}
+
 collect_external_dylibs() {
     local lib_dir="$1"
     shift
@@ -154,11 +180,9 @@ collect_external_dylibs() {
             dep_name="$(basename "${resolved_dep}")"
             dep_dst="${lib_dir}/${dep_name}"
 
-            if [[ ! -f "${dep_dst}" ]]; then
-                echo "  + external ${dep_name} (from ${resolved_dep})"
-                # GeneralsX @bugfix Copilot 20/03/2026 Dereference symlinks so we copy the actual dylib, not a dangling symlink.
-                cp -L "${resolved_dep}" "${dep_dst}"
-            fi
+            # GeneralsX @bugfix moloch 30/07/2026 Reject basename collisions
+            # instead of silently binding a dependency to unrelated bytes.
+            stage_external_dylib "${resolved_dep}" "${dep_dst}"
 
             if ! grep -Fqx "${dep_dst}" "${processed_file}" && ! grep -Fqx "${dep_dst}" "${pending_file}"; then
                 echo "${dep_dst}" >> "${pending_file}"

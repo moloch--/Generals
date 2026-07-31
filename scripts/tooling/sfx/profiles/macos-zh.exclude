@@ -1,0 +1,39 @@
+# GeneralsX @build moloch 30/07/2026 Exclude files that are not needed by the native macOS runtime.
+#
+# A trailing slash excludes an entire directory. Other lines are matched
+# against slash-separated paths with path.Match.
+
+_CommonRedist/
+Manuals/
+RedistInstallers/
+steamapps/
+
+GeneralsXZH.dxvk-cache
+GeneralsXZH_d3d9.log
+gp.info
+id.bin
+gstats.dat
+run.sh
+*.dylib
+*.so
+*.so.*
+
+# Original Windows executables and redistributable runtime components are not
+# used by the SDL3/OpenAL/FFmpeg macOS build.
+Game.dat
+BINKW32.DLL
+P2XDLL.DLL
+MSS/
+ZH_Generals/MSS/
+
+# Installer, launcher, and documentation artifacts.
+Patch.doc
+readme.doc
+installScript.vdf
+launcher.bmp
+Install_Final.bmp
+Generals.ico
+GeneralsZH.ico
+Launcher.txt
+steam_appid.txt
+*.acf
