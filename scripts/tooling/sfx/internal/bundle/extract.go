@@ -26,6 +26,19 @@ type deferredDirectory struct {
 // into dest. Dest must not exist or must be an empty, non-symlink directory.
 // Symlinks are created only after all regular files have been written.
 func ExtractTar(r io.Reader, dest string, manifest Manifest) error {
+	return ExtractTarWithProgress(r, dest, manifest, nil)
+}
+
+// GeneralsX @feature Codex 01/08/2026 Report byte-accurate regular-file extraction progress.
+// ExtractTarWithProgress behaves like ExtractTar and additionally reports the
+// cumulative number of authenticated regular-file bytes written. Progress is
+// optional and has no error channel into extraction.
+func ExtractTarWithProgress(
+	r io.Reader,
+	dest string,
+	manifest Manifest,
+	progress func(completed, total int64),
+) error {
 	if r == nil {
 		return fmt.Errorf("bundle tar reader is nil")
 	}
@@ -42,6 +55,9 @@ func ExtractTar(r io.Reader, dest string, manifest Manifest) error {
 	var symlinks []deferredSymlink
 	var totalSize int64
 	epoch := time.Unix(manifest.Epoch, 0).UTC()
+	if progress != nil {
+		progress(0, manifest.TotalSize)
+	}
 
 	for i, expected := range manifest.Entries {
 		header, err := tr.Next()
@@ -72,10 +88,20 @@ func ExtractTar(r io.Reader, dest string, manifest Manifest) error {
 			if expected.Size > defaultLimits.MaxTotalSize-totalSize {
 				return fmt.Errorf("extracted data exceeds %d bytes", defaultLimits.MaxTotalSize)
 			}
-			if err := extractRegularFile(tr, outputPath, expected, epoch); err != nil {
+			if err := extractRegularFile(
+				tr,
+				outputPath,
+				expected,
+				epoch,
+				func(written int64) {
+					totalSize += written
+					if progress != nil {
+						progress(totalSize, manifest.TotalSize)
+					}
+				},
+			); err != nil {
 				return err
 			}
-			totalSize += expected.Size
 		case EntrySymlink:
 			symlinks = append(symlinks, deferredSymlink{
 				name:   outputPath,
@@ -216,14 +242,24 @@ func verifyHeader(header *tar.Header, expected Entry, epoch time.Time, targetOS 
 	return nil
 }
 
-func extractRegularFile(r io.Reader, outputPath string, expected Entry, epoch time.Time) error {
+func extractRegularFile(
+	r io.Reader,
+	outputPath string,
+	expected Entry,
+	epoch time.Time,
+	progress func(written int64),
+) error {
 	file, err := os.OpenFile(outputPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	if err != nil {
 		return fmt.Errorf("create bundle file %q: %w", expected.Path, err)
 	}
 
 	hash := sha256.New()
-	written, copyErr := io.CopyN(io.MultiWriter(file, hash), r, expected.Size)
+	writers := []io.Writer{file, hash}
+	if progress != nil {
+		writers = append(writers, progressWriter{report: progress})
+	}
+	written, copyErr := io.CopyN(io.MultiWriter(writers...), r, expected.Size)
 	closeErr := file.Close()
 	if copyErr != nil {
 		return fmt.Errorf("extract bundle file %q after %d bytes: %w", expected.Path, written, copyErr)
@@ -241,6 +277,17 @@ func extractRegularFile(r io.Reader, outputPath string, expected Entry, epoch ti
 		return fmt.Errorf("set bundle file timestamp %q: %w", expected.Path, err)
 	}
 	return nil
+}
+
+type progressWriter struct {
+	report func(written int64)
+}
+
+func (writer progressWriter) Write(buffer []byte) (int, error) {
+	if len(buffer) != 0 {
+		writer.report(int64(len(buffer)))
+	}
+	return len(buffer), nil
 }
 
 func verifyExtractedEntrypoint(root string, manifest Manifest) error {

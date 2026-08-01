@@ -21,6 +21,7 @@ import (
 	"github.com/moloch--/Generals/scripts/tooling/sfx/internal/launch"
 	"github.com/moloch--/Generals/scripts/tooling/sfx/internal/notices"
 	"github.com/moloch--/Generals/scripts/tooling/sfx/internal/payload"
+	"github.com/moloch--/Generals/scripts/tooling/sfx/internal/progress"
 	"github.com/moloch--/Generals/scripts/tooling/sfx/internal/signalctx"
 	"github.com/ulikunitz/xz"
 )
@@ -63,6 +64,16 @@ type embeddedBundle struct {
 	manifestBytes  []byte
 	manifestDigest string
 }
+
+// GeneralsX @feature Codex 01/08/2026 Keep first-launch progress presentation optional and testable.
+type extractionProgressReporter interface {
+	Indeterminate(label string)
+	Update(label string, completed, total int64)
+	Complete()
+	Close()
+}
+
+type extractionProgressFactory func() extractionProgressReporter
 
 func main() {
 	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
@@ -152,21 +163,13 @@ func run(arguments []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "GeneralsX SFX: initialize extraction cache: %v\n", err)
 		return 1
 	}
-	leasedRuntime, err := manager.Ensure(ctx, cache.Request{
-		Product:        embedded.manifest.Product,
-		PayloadDigest:  embedded.manifest.PayloadSHA256,
-		ManifestDigest: embedded.manifestDigest,
-		Extract: func(ctx context.Context, destination string) error {
-			fmt.Fprintf(stderr,
-				"GeneralsX SFX: first launch; extracting %.2f GiB to the local cache...\n",
-				float64(embedded.manifest.TotalSize)/(1<<30),
-			)
-			return extractEmbeddedPayload(ctx, embedded, destination)
-		},
-		Validate: func(runtimeRoot string) error {
-			return validateExtractedRuntime(ctx, runtimeRoot, embedded.manifest)
-		},
-	})
+	leasedRuntime, err := ensureCachedRuntime(
+		ctx,
+		manager,
+		embedded,
+		stderr,
+		func() extractionProgressReporter { return progress.Open() },
+	)
 	if err != nil {
 		fmt.Fprintf(stderr, "GeneralsX SFX: prepare native runtime: %v\n", err)
 		return contextFailureExitCode(ctx, 1)
@@ -210,6 +213,57 @@ func run(arguments []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	return 0
+}
+
+// GeneralsX @feature Codex 01/08/2026 Show native progress only for the process that owns a cache-miss extraction.
+func ensureCachedRuntime(
+	ctx context.Context,
+	manager *cache.Manager,
+	embedded embeddedBundle,
+	stderr io.Writer,
+	openProgress extractionProgressFactory,
+) (*cache.Runtime, error) {
+	var reporter extractionProgressReporter
+	leasedRuntime, err := manager.Ensure(ctx, cache.Request{
+		Product:        embedded.manifest.Product,
+		PayloadDigest:  embedded.manifest.PayloadSHA256,
+		ManifestDigest: embedded.manifestDigest,
+		Extract: func(ctx context.Context, destination string) error {
+			if openProgress != nil {
+				reporter = openProgress()
+			}
+			if reporter != nil {
+				reporter.Indeterminate("Checking game package...")
+			}
+			fmt.Fprintf(stderr,
+				"GeneralsX SFX: first launch; extracting %.2f GiB to the local cache...\n",
+				float64(embedded.manifest.TotalSize)/(1<<30),
+			)
+			return extractEmbeddedPayloadWithProgress(
+				ctx,
+				embedded,
+				destination,
+				func(completed, total int64) {
+					if reporter != nil {
+						reporter.Update("Extracting game files...", completed, total)
+					}
+				},
+			)
+		},
+		Validate: func(runtimeRoot string) error {
+			if reporter != nil {
+				reporter.Indeterminate("Verifying game files...")
+			}
+			return validateExtractedRuntime(ctx, runtimeRoot, embedded.manifest)
+		},
+	})
+	if reporter != nil {
+		if err == nil {
+			reporter.Complete()
+		}
+		reporter.Close()
+	}
+	return leasedRuntime, err
 }
 
 func contextFailureExitCode(ctx context.Context, fallback int) int {
@@ -431,6 +485,16 @@ func extractToRequestedPath(ctx context.Context, embedded embeddedBundle, reques
 }
 
 func extractEmbeddedPayload(ctx context.Context, embedded embeddedBundle, destination string) error {
+	return extractEmbeddedPayloadWithProgress(ctx, embedded, destination, nil)
+}
+
+// GeneralsX @feature Codex 01/08/2026 Forward verified regular-file byte counts to first-launch UI.
+func extractEmbeddedPayloadWithProgress(
+	ctx context.Context,
+	embedded embeddedBundle,
+	destination string,
+	report func(completed, total int64),
+) error {
 	if ctx == nil {
 		return errors.New("extract embedded payload requires a non-nil context")
 	}
@@ -467,7 +531,12 @@ func extractEmbeddedPayload(ctx context.Context, embedded embeddedBundle, destin
 	boundedDecompressed := &io.LimitedReader{R: decompressed, N: maxDecompressedSize + 1}
 	countedDecompressed := &countingReader{reader: boundedDecompressed}
 	checkedDecompressed := &contextReader{ctx: ctx, reader: countedDecompressed}
-	if err := bundle.ExtractTar(checkedDecompressed, destination, embedded.manifest); err != nil {
+	if err := bundle.ExtractTarWithProgress(
+		checkedDecompressed,
+		destination,
+		embedded.manifest,
+		report,
+	); err != nil {
 		return fmt.Errorf("extract embedded payload: %w", err)
 	}
 	if _, err := io.Copy(io.Discard, checkedDecompressed); err != nil {

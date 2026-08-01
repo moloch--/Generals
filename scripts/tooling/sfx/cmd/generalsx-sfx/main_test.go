@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/moloch--/Generals/scripts/tooling/sfx/internal/bundle"
+	"github.com/moloch--/Generals/scripts/tooling/sfx/internal/cache"
 	"github.com/moloch--/Generals/scripts/tooling/sfx/internal/launch"
 	"github.com/moloch--/Generals/scripts/tooling/sfx/internal/payload"
 	"github.com/ulikunitz/xz"
@@ -75,6 +76,112 @@ func TestExtractEmbeddedPayloadAndValidateRuntime(t *testing.T) {
 	}
 	if err := validateExtractedRuntime(context.Background(), destination, embedded.manifest); err == nil {
 		t.Fatal("validateExtractedRuntime accepted a tampered entrypoint")
+	}
+}
+
+// GeneralsX @feature Codex 01/08/2026 Keep the macOS progress window scoped to real cache-miss extraction work.
+func TestEnsureCachedRuntimeReportsOnlyColdExtraction(t *testing.T) {
+	embedded := makeTestBundle(t)
+	manager, err := cache.New(cache.Options{Root: filepath.Join(t.TempDir(), "cache")})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var reporters []*recordingExtractionReporter
+	openProgress := func() extractionProgressReporter {
+		reporter := &recordingExtractionReporter{}
+		reporters = append(reporters, reporter)
+		return reporter
+	}
+	var stderr bytes.Buffer
+
+	first, err := ensureCachedRuntime(
+		context.Background(),
+		manager,
+		embedded,
+		&stderr,
+		openProgress,
+	)
+	if err != nil {
+		t.Fatalf("cold ensureCachedRuntime() error = %v", err)
+	}
+	if err := first.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if len(reporters) != 1 {
+		t.Fatalf("cold progress reporter count = %d, want 1", len(reporters))
+	}
+	reporter := reporters[0]
+	if !reporter.closed {
+		t.Fatal("cold progress reporter was not closed")
+	}
+	if !reporter.completed {
+		t.Fatal("successful cold extraction was not marked complete")
+	}
+	if len(reporter.indeterminate) < 2 ||
+		reporter.indeterminate[0] != "Checking game package..." ||
+		!containsString(reporter.indeterminate, "Verifying game files...") {
+		t.Fatalf("cold indeterminate phases = %#v", reporter.indeterminate)
+	}
+	if len(reporter.updates) == 0 {
+		t.Fatal("cold extraction emitted no progress updates")
+	}
+	last := reporter.updates[len(reporter.updates)-1]
+	if last.label != "Extracting game files..." ||
+		last.completed != embedded.manifest.TotalSize ||
+		last.total != embedded.manifest.TotalSize {
+		t.Fatalf("last cold extraction update = %#v", last)
+	}
+
+	second, err := ensureCachedRuntime(
+		context.Background(),
+		manager,
+		embedded,
+		io.Discard,
+		openProgress,
+	)
+	if err != nil {
+		t.Fatalf("warm ensureCachedRuntime() error = %v", err)
+	}
+	if err := second.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if len(reporters) != 1 {
+		t.Fatalf("warm cache opened a progress reporter; count = %d", len(reporters))
+	}
+	if !strings.Contains(stderr.String(), "first launch; extracting") {
+		t.Fatalf("cold extraction diagnostic = %q", stderr.String())
+	}
+}
+
+// GeneralsX @feature Codex 01/08/2026 Dismiss progress when authenticated extraction fails.
+func TestEnsureCachedRuntimeClosesProgressAfterExtractionFailure(t *testing.T) {
+	embedded := makeTestBundle(t)
+	embedded.manifest.PayloadSHA256 = hex.EncodeToString(make([]byte, sha256.Size))
+	manager, err := cache.New(cache.Options{Root: filepath.Join(t.TempDir(), "cache")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	reporter := &recordingExtractionReporter{}
+
+	leased, err := ensureCachedRuntime(
+		context.Background(),
+		manager,
+		embedded,
+		io.Discard,
+		func() extractionProgressReporter { return reporter },
+	)
+	if err == nil || !strings.Contains(err.Error(), "SHA-256 mismatch") {
+		t.Fatalf("ensureCachedRuntime() error = %v", err)
+	}
+	if leased != nil {
+		t.Fatal("failed extraction returned a leased runtime")
+	}
+	if !reporter.closed {
+		t.Fatal("failed extraction left progress reporter open")
+	}
+	if reporter.completed {
+		t.Fatal("failed extraction was marked complete")
 	}
 }
 
@@ -291,6 +398,48 @@ func environmentValues(entries []string) map[string]string {
 		}
 	}
 	return values
+}
+
+type extractionProgressUpdate struct {
+	label     string
+	completed int64
+	total     int64
+}
+
+type recordingExtractionReporter struct {
+	indeterminate []string
+	updates       []extractionProgressUpdate
+	completed     bool
+	closed        bool
+}
+
+func (reporter *recordingExtractionReporter) Indeterminate(label string) {
+	reporter.indeterminate = append(reporter.indeterminate, label)
+}
+
+func (reporter *recordingExtractionReporter) Update(label string, completed, total int64) {
+	reporter.updates = append(reporter.updates, extractionProgressUpdate{
+		label:     label,
+		completed: completed,
+		total:     total,
+	})
+}
+
+func (reporter *recordingExtractionReporter) Complete() {
+	reporter.completed = true
+}
+
+func (reporter *recordingExtractionReporter) Close() {
+	reporter.closed = true
+}
+
+func containsString(values []string, expected string) bool {
+	for _, value := range values {
+		if value == expected {
+			return true
+		}
+	}
+	return false
 }
 
 func makeTestBundle(t *testing.T) embeddedBundle {

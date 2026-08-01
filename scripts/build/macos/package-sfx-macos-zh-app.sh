@@ -12,6 +12,9 @@ APP_VERSION="${GX_SFX_APP_VERSION:-0.1.0}"
 APP_BUILD_VERSION="${GX_SFX_APP_BUILD_VERSION:-}"
 CODESIGN_IDENTITY="${GX_SFX_APP_CODESIGN_IDENTITY:--}"
 BUNDLE_IDENTIFIER="com.generalsx.generalsxzh.sfx"
+PROGRESS_HELPER_SOURCE="${PROJECT_ROOT}/scripts/tooling/sfx/macos/progress.m"
+PROGRESS_HELPER_NAME="GeneralsX-SFX-Progress"
+PROGRESS_HELPER_IDENTIFIER="${BUNDLE_IDENTIFIER}.progress"
 APP_NAME="GeneralsXZH.app"
 APP_STAGE_ROOT=""
 APP_BACKUP=""
@@ -137,23 +140,23 @@ icon_512x512@2x.png 1024
 ICON_SIZES
 }
 
-validate_macho_launcher() {
+validate_arm64_system_macho() {
     local executable="$1"
+    local description="$2"
     local dependency
-    local info
 
     if ! lipo "${executable}" -verify_arch arm64 >/dev/null 2>&1; then
-        fail "App executable has no arm64 slice: ${executable}."
+        fail "${description} has no arm64 slice: ${executable}."
     fi
     if [[ "$(lipo -archs "${executable}")" != "arm64" ]]; then
-        fail "App executable must be ARM64-only: $(lipo -archs "${executable}")."
+        fail "${description} must be ARM64-only: $(lipo -archs "${executable}")."
     fi
     if ! file "${executable}" | grep -Fq "Mach-O 64-bit executable arm64"; then
-        fail "App executable is not an ARM64 Mach-O file: $(file "${executable}")."
+        fail "${description} is not an ARM64 Mach-O file: $(file "${executable}")."
     fi
     if otool -l "${executable}" |
         awk '$1 == "cmd" && $2 == "LC_RPATH" { found = 1 } END { exit !found }'; then
-        fail "The SFX app launcher unexpectedly contains LC_RPATH entries."
+        fail "${description} unexpectedly contains LC_RPATH entries."
     fi
     while IFS= read -r dependency; do
         [[ -n "${dependency}" ]] || continue
@@ -161,10 +164,17 @@ validate_macho_launcher() {
             /System/Library/* | /usr/lib/*)
                 ;;
             *)
-                fail "The SFX app launcher has a non-system dependency: ${dependency}."
+                fail "${description} has a non-system dependency: ${dependency}."
                 ;;
         esac
     done < <(otool -L "${executable}" | awk 'NR > 1 { print $1 }')
+}
+
+validate_macho_launcher() {
+    local executable="$1"
+    local info
+
+    validate_arm64_system_macho "${executable}" "The SFX app launcher"
 
     info="$("${executable}" --sfx-info)"
     grep -Eq '^Product:[[:space:]]+GeneralsXZH$' <<< "${info}" ||
@@ -175,12 +185,49 @@ validate_macho_launcher() {
         fail "The app executable has an unexpected payload entrypoint."
 }
 
+validate_macho_progress_helper() {
+    local executable="$1"
+    local minimum_version
+
+    validate_arm64_system_macho "${executable}" "The SFX progress helper"
+    minimum_version="$(
+        otool -l "${executable}" |
+            awk '$1 == "cmd" && $2 == "LC_BUILD_VERSION" { found = 1; next }
+                 found && $1 == "minos" { print $2; exit }'
+    )"
+    if [[ "${minimum_version}" != "15.0" ]]; then
+        fail "The SFX progress helper targets macOS ${minimum_version:-unknown}, expected 15.0."
+    fi
+    "${executable}" --self-test >/dev/null
+}
+
+build_progress_helper() {
+    local source="$1"
+    local output="$2"
+
+    echo "Compiling the native extraction-progress helper..."
+    xcrun --sdk macosx clang \
+        -arch arm64 \
+        -mmacosx-version-min=15.0 \
+        -fobjc-arc \
+        -O2 \
+        -Wall \
+        -Wextra \
+        -Wpedantic \
+        -Werror \
+        -framework AppKit \
+        -framework Foundation \
+        "${source}" \
+        -o "${output}"
+}
+
 usage() {
     cat <<'USAGE'
 Usage: ./scripts/build/macos/package-sfx-macos-zh-app.sh
 
 Packages the existing macOS/ARM64 self-extracting executable as a signed,
-Finder-launchable GeneralsXZH.app with a complete Retina .icns icon.
+Finder-launchable GeneralsXZH.app with a Retina icon and native extraction
+progress window.
 
 Environment:
   GX_SFX_APP_INPUT             Input SFX executable
@@ -204,7 +251,7 @@ fi
 if [[ "$(uname -s)" != "Darwin" || "$(uname -m)" != "arm64" ]]; then
     fail "The SFX app must be packaged on macOS/ARM64."
 fi
-for required_command in codesign file iconutil lipo otool plutil sips xattr; do
+for required_command in codesign file iconutil lipo otool plutil sips xattr xcrun; do
     command -v "${required_command}" >/dev/null 2>&1 ||
         fail "Required command is unavailable: ${required_command}."
 done
@@ -214,6 +261,9 @@ if [[ ! -f "${SFX_INPUT}" || -L "${SFX_INPUT}" || ! -x "${SFX_INPUT}" ]]; then
 fi
 if [[ ! -f "${ICON_SOURCE}" || -L "${ICON_SOURCE}" ]]; then
     fail "Icon source must be a regular file: ${ICON_SOURCE}."
+fi
+if [[ ! -f "${PROGRESS_HELPER_SOURCE}" || -L "${PROGRESS_HELPER_SOURCE}" ]]; then
+    fail "Progress helper source must be a regular file: ${PROGRESS_HELPER_SOURCE}."
 fi
 SFX_INPUT="$(cd "$(dirname -- "${SFX_INPUT}")" && pwd -P)/$(basename -- "${SFX_INPUT}")"
 ICON_SOURCE="$(cd "$(dirname -- "${ICON_SOURCE}")" && pwd -P)/$(basename -- "${ICON_SOURCE}")"
@@ -272,16 +322,20 @@ STAGED_APP="${APP_STAGE_ROOT}/${APP_NAME}"
 CONTENTS_DIR="${STAGED_APP}/Contents"
 MACOS_DIR="${CONTENTS_DIR}/MacOS"
 RESOURCES_DIR="${CONTENTS_DIR}/Resources"
+HELPERS_DIR="${CONTENTS_DIR}/Helpers"
 EXECUTABLE="${MACOS_DIR}/GeneralsXZH"
+PROGRESS_HELPER="${HELPERS_DIR}/${PROGRESS_HELPER_NAME}"
 PLIST="${CONTENTS_DIR}/Info.plist"
 ICON="${RESOURCES_DIR}/GeneralsXZH.icns"
-mkdir -p -- "${MACOS_DIR}" "${RESOURCES_DIR}"
+mkdir -p -- "${MACOS_DIR}" "${RESOURCES_DIR}" "${HELPERS_DIR}"
 
 echo "Packaging ${SFX_INPUT} as ${APP_OUTPUT}..."
 if ! cp -c -- "${SFX_INPUT}" "${EXECUTABLE}" 2>/dev/null; then
     cp -- "${SFX_INPUT}" "${EXECUTABLE}"
 fi
 chmod 0755 "${EXECUTABLE}"
+build_progress_helper "${PROGRESS_HELPER_SOURCE}" "${PROGRESS_HELPER}"
+chmod 0755 "${PROGRESS_HELPER}"
 
 cat > "${PLIST}" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -331,7 +385,7 @@ echo "Generating the Retina app icon from ${ICON_SOURCE}..."
 generate_icns "${ICON_SOURCE}" "${ICON}" "${APP_STAGE_ROOT}"
 
 # GeneralsX @build moloch 31/07/2026 Normalize bundle permissions independently of the caller's umask.
-chmod 0755 "${STAGED_APP}" "${CONTENTS_DIR}" "${MACOS_DIR}" "${RESOURCES_DIR}"
+chmod 0755 "${STAGED_APP}" "${CONTENTS_DIR}" "${MACOS_DIR}" "${RESOURCES_DIR}" "${HELPERS_DIR}"
 chmod 0644 "${PLIST}" "${CONTENTS_DIR}/PkgInfo" "${ICON}"
 
 plutil -lint "${PLIST}" >/dev/null
@@ -341,9 +395,24 @@ assert_plist_value "${PLIST}" CFBundleIdentifier "${BUNDLE_IDENTIFIER}"
 assert_plist_value "${PLIST}" CFBundlePackageType APPL
 assert_plist_value "${PLIST}" LSMinimumSystemVersion 15.0
 validate_macho_launcher "${EXECUTABLE}"
+validate_macho_progress_helper "${PROGRESS_HELPER}"
 
 # GeneralsX @build moloch 31/07/2026 Strip copied extended attributes before sealing the completed bundle.
 xattr -cr "${STAGED_APP}"
+# GeneralsX @build Codex 01/08/2026 Sign nested native code before sealing it in the outer app signature.
+echo "Signing the extraction-progress helper with identity '${CODESIGN_IDENTITY}'..."
+if [[ "${CODESIGN_IDENTITY}" == "-" ]]; then
+    codesign --force --sign - --identifier "${PROGRESS_HELPER_IDENTIFIER}" --timestamp=none "${PROGRESS_HELPER}"
+else
+    codesign --force --sign "${CODESIGN_IDENTITY}" --identifier "${PROGRESS_HELPER_IDENTIFIER}" "${PROGRESS_HELPER}"
+fi
+codesign --verify --strict --verbose=2 "${PROGRESS_HELPER}"
+HELPER_SIGNATURE_DETAILS="$(codesign -d --verbose=4 "${PROGRESS_HELPER}" 2>&1)"
+if ! grep -Fqx "Identifier=${PROGRESS_HELPER_IDENTIFIER}" <<< "${HELPER_SIGNATURE_DETAILS}"; then
+    printf '%s\n' "${HELPER_SIGNATURE_DETAILS}" >&2
+    fail "Signed progress helper has an unexpected code-signing identifier."
+fi
+
 echo "Signing the completed app bundle with identity '${CODESIGN_IDENTITY}'..."
 if [[ "${CODESIGN_IDENTITY}" == "-" ]]; then
     codesign --force --sign - --timestamp=none "${STAGED_APP}"
@@ -351,6 +420,7 @@ else
     codesign --force --sign "${CODESIGN_IDENTITY}" "${STAGED_APP}"
 fi
 codesign --verify --deep --strict --verbose=2 "${STAGED_APP}"
+codesign --verify --strict --verbose=2 "${PROGRESS_HELPER}"
 SIGNATURE_DETAILS="$(codesign -d --verbose=4 "${STAGED_APP}" 2>&1)"
 if ! grep -Fqx "Identifier=${BUNDLE_IDENTIFIER}" <<< "${SIGNATURE_DETAILS}"; then
     printf '%s\n' "${SIGNATURE_DETAILS}" >&2

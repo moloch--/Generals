@@ -80,6 +80,66 @@ func TestWriteTarDeterministicRoundTrip(t *testing.T) {
 	assertFile(t, filepath.Join(destination, "empty"), "", 0o600)
 }
 
+// GeneralsX @feature Codex 01/08/2026 Cover byte-accurate extraction progress without changing ExtractTar callers.
+func TestExtractTarWithProgressReportsRegularFileBytes(t *testing.T) {
+	source := t.TempDir()
+	mustMkdir(t, filepath.Join(source, "data"), 0o755)
+	large := bytes.Repeat([]byte("GeneralsX-progress-"), 16*1024)
+	mustWrite(t, filepath.Join(source, "data", "large.big"), large, 0o644)
+	mustWrite(t, filepath.Join(source, "run"), []byte("#!/bin/sh\n"), 0o755)
+
+	var archive bytes.Buffer
+	manifest, err := WriteTar(source, &archive, PackOptions{
+		Product:    "GeneralsXZH",
+		Version:    "test",
+		TargetOS:   "darwin",
+		TargetArch: "arm64",
+		Entrypoint: "run",
+		Epoch:      time.Unix(1234, 0),
+	})
+	if err != nil {
+		t.Fatalf("WriteTar: %v", err)
+	}
+
+	type update struct {
+		completed int64
+		total     int64
+	}
+	var updates []update
+	destination := filepath.Join(t.TempDir(), "extracted")
+	err = ExtractTarWithProgress(
+		bytes.NewReader(archive.Bytes()),
+		destination,
+		manifest,
+		func(completed, total int64) {
+			updates = append(updates, update{completed: completed, total: total})
+		},
+	)
+	if err != nil {
+		t.Fatalf("ExtractTarWithProgress: %v", err)
+	}
+	if len(updates) < 3 {
+		t.Fatalf("progress updates = %#v, want start, intermediate, and completion", updates)
+	}
+	if got := updates[0]; got != (update{completed: 0, total: manifest.TotalSize}) {
+		t.Fatalf("initial progress = %#v, want 0/%d", got, manifest.TotalSize)
+	}
+	previous := int64(-1)
+	for index, got := range updates {
+		if got.total != manifest.TotalSize {
+			t.Fatalf("update %d total = %d, want %d", index, got.total, manifest.TotalSize)
+		}
+		if got.completed < previous || got.completed > got.total {
+			t.Fatalf("update %d is not bounded and monotonic: previous=%d update=%#v", index, previous, got)
+		}
+		previous = got.completed
+	}
+	if got := updates[len(updates)-1]; got.completed != manifest.TotalSize {
+		t.Fatalf("final progress = %#v, want %d/%d", got, manifest.TotalSize, manifest.TotalSize)
+	}
+	assertFile(t, filepath.Join(destination, "data", "large.big"), string(large), 0o644)
+}
+
 func TestWriteTarPreservesSafeSymlink(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("creating symlinks may require Windows developer mode")

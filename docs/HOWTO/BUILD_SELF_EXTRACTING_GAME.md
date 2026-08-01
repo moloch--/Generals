@@ -10,8 +10,9 @@ launches reuse the verified cache.
 
 On macOS, the integrated build also places that same executable directly inside
 a signed `GeneralsXZH.app`. The app adds normal Finder/Dock metadata and a
-Retina `.icns` icon; it does not add another game launcher or duplicate any
-game logic.
+Retina `.icns` icon. A small, separately signed AppKit helper presents
+first-launch extraction progress while the Go SFX remains the only game
+launcher and source of cache state.
 
 An SFX is native to one operating system and CPU architecture. It is not an
 emulator or a universal binary:
@@ -39,7 +40,9 @@ host OS or architecture.
 > blocked by the native runtime dependencies described below. These measured
 > artifacts recorded embedded version `5b2bdadb0ed4-dirty`; their wrapper
 > checksums will change with a commit, version override, rebuild, or asset
-> change.
+> change. The progress-enabled macOS app integration was subsequently validated
+> with a signed fixture bundle, cold/warm cache launches, and macOS
+> Accessibility inspection; the measured retail artifact predates that UI.
 
 ## Before You Begin
 
@@ -98,9 +101,9 @@ The script:
 7. excludes files unused by the native macOS build;
 8. packs the stage with XZ and embeds it in a Go launcher;
 9. applies a local ad-hoc signature to the raw executable;
-10. packages that executable as a proper ARM64 `.app`, generates all ten icon
-    representations from 16x16 through 1024x1024, and signs and validates the
-    completed bundle.
+10. packages that executable as a proper ARM64 `.app`, compiles its native
+    progress helper, generates all ten icon representations from 16x16 through
+    1024x1024, and signs and validates the completed bundle.
 
 The default asset directory is `~/GeneralsX/GeneralsZH`, and the default output
 files are `build/sfx/GeneralsXZH-macos-arm64-sfx` and
@@ -129,11 +132,11 @@ To rebuild only the `.app` around an existing SFX executable:
 ```
 
 The app packager uses an APFS copy-on-write clone when available, stages and
-signs the complete bundle before publication, retains the previous matching
-bundle for rollback during replacement, and refuses to replace a bundle with a
-different identifier. The integrated build also rejects an app output inside
-the retail tree or either output nested inside the other. Its optional
-metadata/signing overrides are
+signs the nested AppKit progress helper and complete bundle before publication,
+retains the previous matching bundle for rollback during replacement, and
+refuses to replace a bundle with a different identifier. The integrated build
+also rejects an app output inside the retail tree or either output nested
+inside the other. Its optional metadata/signing overrides are
 `GX_SFX_APP_VERSION`, `GX_SFX_APP_BUILD_VERSION`,
 `GX_SFX_APP_ICON_SOURCE`, and `GX_SFX_APP_CODESIGN_IDENTITY`.
 
@@ -177,7 +180,10 @@ open -n "${app}" --args -win
 ```
 
 You can also double-click `GeneralsXZH.app` in Finder. With no arguments it
-extracts or verifies its private cache and launches the game normally.
+extracts or verifies its private cache and launches the game normally. On a
+cache miss, the app displays an animated package-checking phase, byte-accurate
+file-extraction progress, and an animated validation phase. The window is not
+opened on warm launches or when using the raw SFX executable.
 
 The local build is ad-hoc signed, so its plist and icon are sealed and signature
 corruption is detectable. It is not Developer ID signed or notarized. Normal
@@ -275,7 +281,9 @@ location without independently verifying its DACL.
 On a cache miss, the launcher takes exclusive kernel-backed acquisition and
 runtime leases, extracts into a private same-filesystem staging directory,
 checks every file, writes its completion marker last, and atomically publishes
-the result.
+the result. In the macOS app, only the process performing that extraction opens
+the native progress window; concurrent launches waiting for its cache result do
+not claim duplicate progress.
 Concurrent first launches wait for the same content entry. Cache hits validate
 the complete expected structure, metadata, symlinks, and every manifest-listed
 payload regular-file SHA-256 while holding a shared lease, which remains held

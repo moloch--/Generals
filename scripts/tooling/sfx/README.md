@@ -3,12 +3,15 @@
 This Go module builds a native GeneralsX game, its runtime libraries, and a
 locally staged retail-data tree into one self-extracting executable.
 
-> **Current status (2026-07-31):** the packer, launcher, deterministic archive,
+> **Current status (2026-08-01):** the packer, launcher, deterministic archive,
 > extraction cache, safety checks, and platform staging paths are implemented.
-> The measured retail-sized macOS/ARM64 artifact passed code-signature and full
-> extraction verification, then reached the Zero Hour main menu on both cold
-> and warm-cache launches. It is also packaged as a signed Finder-recognized
-> `.app` with a complete Retina icon. The Linux/AMD64 artifact passed full
+> The previously measured retail-sized macOS/ARM64 artifact passed
+> code-signature and full extraction verification, then reached the Zero Hour
+> main menu on both cold and warm-cache launches. The current macOS path
+> packages the launcher as a signed Finder-recognized `.app` with a complete
+> Retina icon and native first-launch progress window; the progress-enabled app
+> bundle has also passed signed fixture-based cold/warm launch validation. The
+> Linux/AMD64 artifact passed full
 > extraction and file-hash verification under an AMD64 Linux container; its
 > graphical runtime still needs a native Linux/Vulkan host. Windows wrapper cross-builds pass,
 > but the current Windows game runtime is not gameplay-ready.
@@ -89,6 +92,8 @@ The module is divided into a few narrow components:
   coordination, crash-safe kernel locks, and runtime/purge leases.
 - `internal/launch` prepares target-specific library paths, asset paths,
   writable runtime state, environment, arguments, and standard streams.
+- `internal/progress` sends throttled, best-effort extraction updates to the
+  separately packaged macOS AppKit helper without adding CGO to the launcher.
 - `internal/payload` selects an empty development filesystem by default and
   the generated `go:embed` filesystem only under the `gxpacked` build tag.
 
@@ -319,6 +324,15 @@ On a cache miss, the launcher:
 3. verifies archive structure, modes, sizes, symlinks, and file hashes;
 4. writes the completion marker last;
 5. atomically renames the complete stage into its final cache path.
+
+When the launcher runs inside `GeneralsXZH.app`, the process that actually owns
+that cache-miss extraction also opens a native progress window. Package
+authentication and final cache validation use an animated indeterminate bar;
+regular-file extraction uses exact bytes written against the manifest's total.
+The helper is presentation-only and best-effort: a missing or failed helper
+does not change extraction, cache publication, or launch behavior. Raw SFX
+executables and non-macOS targets retain their console-only behavior, and warm
+app launches do not open the extraction window.
 
 Concurrent first launches wait for the same content entry instead of exposing
 a partially extracted tree. Later launches take a shared lease, validate the
@@ -555,6 +569,7 @@ codesign -dv --verbose=4 "${artifact}"
 app="build/sfx/GeneralsXZH.app"
 codesign --verify --deep --strict --verbose=2 "${app}"
 codesign -dv --verbose=4 "${app}"
+"${app}/Contents/Helpers/GeneralsX-SFX-Progress" --self-test
 ```
 
 ## XZ third-party notice
