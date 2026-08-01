@@ -483,7 +483,8 @@ void PopulateLobbyPlayerListbox()
 		// save off old selection
 		Int maxSelectedItems = GadgetListBoxGetNumEntries(listboxLobbyPlayers);
 		Int *selectedIndices;
-		GadgetListBoxGetSelected(listboxLobbyPlayers, (Int *)(&selectedIndices));
+		// GeneralsX @bugfix Codex 01/08/2026 Use the pointer-width-safe multi-select overload.
+		GadgetListBoxGetSelected(listboxLobbyPlayers, &selectedIndices);
 		std::set<AsciiString> selectedNames;
 		std::set<AsciiString>::const_iterator selIt;
 		std::set<Int> indicesToSelect;

@@ -34,10 +34,10 @@ Clone the server repository, then run it from `generals-server/`:
 git clone https://github.com/moloch--/generals-server.git
 cd generals-server
 go run ./cmd/generals-server \
-  -control-listen 127.0.0.1:29900 \
-  -relay-listen 127.0.0.1:27901 \
-  -health-listen 127.0.0.1:8080 \
-  -public-host 127.0.0.1
+  --control-listen 127.0.0.1:29900 \
+  --relay-listen 127.0.0.1:27901 \
+  --health-listen 127.0.0.1:8080 \
+  --public-host 127.0.0.1
 ```
 
 A bare endpoint uses plaintext guest mode for local development:
@@ -63,19 +63,21 @@ public relay name:
 
 ```bash
 ./generals-server \
-  -control-listen :29900 \
-  -relay-listen :27901 \
-  -health-listen 127.0.0.1:8080 \
-  -public-host online.example.net \
-  -tls-cert /etc/generals-server/tls/fullchain.pem \
-  -tls-key /etc/generals-server/tls/privkey.pem \
-  -data-file /var/lib/generals-server/profiles.json
+  --control-listen :29900 \
+  --relay-listen :27901 \
+  --health-listen 127.0.0.1:8080 \
+  --public-host online.example.net \
+  --tls-cert /etc/generals-server/tls/fullchain.pem \
+  --tls-key /etc/generals-server/tls/privkey.pem \
+  --data-file /var/lib/generals-server/profiles.db
 ```
 
 Docker Compose and systemd examples are included in the server repository.
-Back up the profile database or its named container volume before upgrades.
-The MVP is a single-node service: do not point multiple processes at the same
-JSON database.
+File-backed SQLite databases use WAL, so do not copy only `profiles.db` while
+the service is running: use a SQLite-consistent backup, or stop the service and
+copy the complete database directory or named container volume. The service
+remains single-node; do not point multiple processes at the same SQLite
+database.
 
 Allow these public firewall rules:
 
@@ -172,7 +174,7 @@ player/game counts. During a match, relay packet counters should increase.
   certificate chain, and correct the system clock. IP certificates work only
   when the IP address is explicitly present in the certificate.
 - **Lobby works but the game stalls:** publish/forward UDP 27901 as UDP, set
-  `-public-host` to a name every player can resolve, and inspect the relay drop
+  `--public-host` to a name every player can resolve, and inspect the relay drop
   counters.
 - **Bad password when joining a game:** the staged-game password is independent
   of the account password.

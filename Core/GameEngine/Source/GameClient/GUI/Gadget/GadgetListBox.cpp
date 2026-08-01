@@ -1792,10 +1792,8 @@ WindowMsgHandledType GadgetListBoxSystem( GameWindow *window, UnsignedInt msg,
 		{
 
 			if( list->multiSelect )
-				// GeneralsX @bugfix BenderAI 12/02/2026 - Cast via intptr_t for 64-bit compatibility
-				// list->selections is a pointer being stored as Int (common pattern for GUI message passing).
-				// On 64-bit Linux, pointers are 8 bytes but Int is 4 bytes. Cast through intptr_t first.
-				*(Int*)mData2 = static_cast<Int>(reinterpret_cast<intptr_t>(list->selections));
+				// GeneralsX @bugfix Codex 01/08/2026 Preserve the full multi-select pointer on 64-bit targets.
+				*(Int**)mData2 = list->selections;
 			else
 				*(Int*)mData2 = list->selectPos;
 
@@ -2635,6 +2633,21 @@ void GadgetListBoxGetSelected( GameWindow *listbox, Int *selectList )
 }
 
 //-------------------------------------------------------------------------------------------------
+// GeneralsX @bugfix Codex 01/08/2026 Provide a pointer-width-safe overload for multi-select lists.
+//-------------------------------------------------------------------------------------------------
+void GadgetListBoxGetSelected( GameWindow *listbox, Int **selectList )
+{
+
+	// sanity
+	if( listbox == nullptr )
+		return;
+
+	// get selected indices via system message
+	TheWindowManager->winSendSystemMsg( listbox, GLM_GET_SELECTION, 0, (WindowMsgData)selectList );
+
+}
+
+//-------------------------------------------------------------------------------------------------
 /** Set the selected item of a listbox.  The parameter is a single integer.  If
   * the selected index is less than 0, nothing is selected. */
 //-------------------------------------------------------------------------------------------------
@@ -2825,4 +2838,3 @@ Int GadgetListBoxGetColumnWidth( GameWindow *listbox, Int column )
 
 	return listboxData->columnWidth[column];
 }
-

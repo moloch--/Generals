@@ -308,7 +308,8 @@ Bool GameSpySendChat( UnicodeString message, Bool isAction, GameWindow *playerLi
 		// Get the selections (is this a private message?)
 		Int maxSel = GadgetListBoxGetListLength(playerListbox);
 		Int *selections;
-		GadgetListBoxGetSelected(playerListbox, (Int *)&selections);
+		// GeneralsX @bugfix Codex 01/08/2026 Use the pointer-width-safe multi-select overload.
+		GadgetListBoxGetSelected(playerListbox, &selections);
 
 		if (selections[0] == -1)
 		{
@@ -452,4 +453,3 @@ void GameSpyAddText( UnicodeString message, GameSpyColors color )
 	GadgetListBoxAddEntryText(textWindow, message, GameSpyColor[color], -1, -1);
 
 }
-

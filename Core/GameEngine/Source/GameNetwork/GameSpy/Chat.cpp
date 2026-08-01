@@ -151,7 +151,8 @@ Bool GameSpyInfo::sendChat( UnicodeString message, Bool isAction, GameWindow *pl
 		// Get the selections (is this a private message?)
 		Int maxSel = GadgetListBoxGetMaxSelectedLength(playerListbox);
 		Int *selections;
-		GadgetListBoxGetSelected(playerListbox, (Int *)&selections);
+		// GeneralsX @bugfix Codex 01/08/2026 Use the pointer-width-safe multi-select overload.
+		GadgetListBoxGetSelected(playerListbox, &selections);
 
 		if (selections[0] == -1)
 		{	// Public message
@@ -349,4 +350,3 @@ void GameSpyInfo::unregisterTextWindow( GameWindow *win )
 {
 	m_textWindows.erase(win);
 }
-
