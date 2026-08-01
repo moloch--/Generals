@@ -133,7 +133,9 @@
             },
             "cacheVariables": {
                 "RTS_FLAGS": "/W3",
-                "SAGE_ONLINE_TLS": "ON"
+                "SAGE_ONLINE_TLS": "ON",
+                "SAGE_USE_DX8": "ON",
+                "RTS_BUILD_OPTION_SAGE_PATCH": "OFF"
             },
             "vendor": {
                 "jetbrains.com/clion": {
