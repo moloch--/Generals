@@ -501,6 +501,12 @@ directory; any legacy relative write not covered by the DXVK state variables
 would invalidate that immutable cache entry. Native Windows integration must
 redirect or otherwise contain those writes before this path is gameplay-ready.
 
+A game built with the `win32-vcpkg` preset for verified Online TLS imports the
+x86 Release `libcurl.dll` and `zlib1.dll`. A self-contained stage also needs
+`MSVCP140.dll`, `MSVCP140_ATOMIC_WAIT.dll`, and `VCRUNTIME140.dll` beside
+`generalszh.exe`. This curl build uses Windows Schannel, so it does not add
+OpenSSL DLLs to the closure.
+
 ## Development verification
 
 From the repository root:

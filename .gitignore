@@ -49,6 +49,9 @@ thumbs.db
 /Dependencies/MaxSDK/maxsdk
 /tmp/
 
+# GeneralsX @build OpenAI 01/08/2026 Keep the standalone Online server as its own adjacent Git repository.
+/generals-server/
+
 ## AI assistant config (user-specific)
 /.claude/
 /CLAUDE.md

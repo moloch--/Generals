@@ -24,7 +24,11 @@ import (
 )
 
 func TestParseActionForwardsGameArgumentsWithoutInterpretation(t *testing.T) {
-	arguments := []string{"-win", "argument with spaces", "$(not-a-shell)", "semi;colon"}
+	// GeneralsX @feature Codex 01/08/2026 Keep the Online endpoint override intact through standalone launchers.
+	arguments := []string{
+		"-win", "-onlineServer", "tls://online.example.org:30000",
+		"argument with spaces", "$(not-a-shell)", "semi;colon",
+	}
 	got, err := parseAction(arguments)
 	if err != nil {
 		t.Fatal(err)

@@ -132,7 +132,8 @@
                 "strategy": "external"
             },
             "cacheVariables": {
-                "RTS_FLAGS": "/W3"
+                "RTS_FLAGS": "/W3",
+                "SAGE_ONLINE_TLS": "ON"
             },
             "vendor": {
                 "jetbrains.com/clion": {

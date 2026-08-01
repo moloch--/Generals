@@ -33,6 +33,15 @@ Common command line parameters for `GeneralsX` (Generals) and `GeneralsXZH` (Zer
 | `-replay <file>` | Play a replay file | `./GeneralsXZH -replay match.rep` |
 | `-jobs <count>` | Number of parallel replay jobs | `./GeneralsXZH -jobs 4 -replay *.rep` |
 | `-headless` | Run without graphics (replay testing) | `./GeneralsXZH -headless -replay *.rep` |
+| `-onlineServer <[tls://]host[:port]>` | Routes `MULTIPLAYER > ONLINE` through the configured standalone Online service. Use `tls://` for verified account login; a bare endpoint is plaintext guest-only development mode. | `./GeneralsXZH -onlineServer tls://online.example.org:29900` |
+
+`tls://` validates the server certificate and hostname, requires TLS 1.2 or newer,
+and never falls back to plaintext. LAN/local multiplayer is unchanged by this flag.
+Custom Online joins and Quick Match require the same game product, Online
+compatibility generation, and gameplay INI CRC. Native executable CRCs are not
+compared across macOS and Windows builds.
+The replacement client is available in modern CMake builds; the VC6 reference
+preset retains the original legacy Online implementation.
 
 ## Common Combinations
 
@@ -59,6 +68,18 @@ Test in windowed mode at 1440p resolution.
 ### Windows
 - Parameters can use `/` or `-` prefix (both work)
 - Paths can use backslashes
+- A self-extracting launcher forwards `-onlineServer` and `--onlineServer` to
+  the extracted game process.
+- TLS-capable Windows game builds use the `win32-vcpkg` preset. Their standalone
+  payload must stage the x86 `libcurl.dll` and `zlib1.dll` runtime files beside
+  the game executable; certificate verification uses Windows Schannel.
+
+### macOS
+- Launch an application bundle with Online arguments using `open -n
+  "/Applications/GeneralsXZH.app" --args -onlineServer
+  tls://online.example.net:29900`.
+- TLS endpoints verify the server certificate and hostname using the operating
+  system trust store and never fall back to plaintext.
 
 ### Linux
 - Must use `-` prefix
@@ -92,5 +113,6 @@ grep -n "SKIRMISH_DIAG\|ScoreScreen\|SkirmishGameOptionsMenu" ~/Projects/General
 ## Source Code Reference
 
 Command line parsing is implemented in:
-- `Core/GameEngine/Source/gameclient.cpp` - Client-side parameters
-- `GeneralsMD/Code/Main/WinMain.cpp` - Entry point and initial parsing
+- `Generals/Code/GameEngine/Source/Common/CommandLine.cpp` - Generals parameters
+- `GeneralsMD/Code/GameEngine/Source/Common/CommandLine.cpp` - Zero Hour parameters
+- `Core/GameEngine/Source/GameNetwork/Online/OnlineEndpoint.cpp` - strict Online endpoint parsing

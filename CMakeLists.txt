@@ -33,6 +33,12 @@ endif()
 # Top level project, doesn't really affect anything.
 project(genzh LANGUAGES C CXX)
 
+# GeneralsX @build Codex 01/08/2026 Keep focused Online protocol tests opt-in for normal game builds.
+option(RTS_BUILD_ONLINE_TESTS "Build focused Online endpoint and relay-state tests" OFF)
+if(RTS_BUILD_ONLINE_TESTS)
+    enable_testing()
+endif()
+
 # GeneralsX @build BenderAI 10/02/2026
 # Linux port: Make CompatLib headers globally accessible so Core libraries (WWLib, WWMath, etc.)
 # can access platform compatibility types when building for non-Windows platforms
@@ -85,6 +91,10 @@ endif()
 
 include(cmake/config.cmake)
 include(cmake/gamespy.cmake)
+# GeneralsX @build Codex 01/08/2026 Provide bounded JSON parsing for the shared Online control protocol.
+if(NOT IS_VS6_BUILD)
+    include(cmake/json.cmake)
+endif()
 include(cmake/lzhl.cmake)
 include(cmake/stb.cmake)
 
@@ -93,8 +103,8 @@ include(cmake/stb.cmake)
 # openal.cmake is self-guarded with if(SAGE_USE_OPENAL), so this is always safe to include.
 include(cmake/openal.cmake)
 
-# GeneralsX @feature BenderAI 21/04/2026 libcurl for in-game update checker (SAGE_UPDATE_CHECK builds)
-# curl.cmake is self-guarded with if(SAGE_UPDATE_CHECK), so always safe to include.
+# GeneralsX @feature BenderAI 21/04/2026 libcurl for the updater and verified Online TLS.
+# curl.cmake is self-guarded, so it remains safe for legacy builds.
 include(cmake/curl.cmake)
 
 # GeneralsX @feature fbraz 03/05/2026 Phase 4: Deterministic math library integration

@@ -31,6 +31,13 @@
 #include "GameNetwork/udp.h"
 #include "GameNetwork/NetworkDefs.h"
 
+// GeneralsX @refactor Codex 01/08/2026 Keep native socket address types behind the transport boundary.
+struct TransportDatagramSource
+{
+	UnsignedInt address;
+	UnsignedShort port;
+};
+
 /**
  * The transport layer handles the UDP socket for the game, and will packetize and
  * de-packetize multiple ACK/CommandPacket/etc packets into larger aggregates.
@@ -43,20 +50,20 @@ class Transport //: public MemoryPoolObject
 public:
 
 	Transport();
-	~Transport();
+	virtual ~Transport();
 
-	Bool init( AsciiString ip, UnsignedShort port );
-	Bool init( UnsignedInt ip, UnsignedShort port );
-	void reset();
-	Bool update();									///< Call this once a GameEngine tick, regardless of whether the frame advances.
+	virtual Bool init( AsciiString ip, UnsignedShort port );
+	virtual Bool init( UnsignedInt ip, UnsignedShort port );
+	virtual void reset();
+	virtual Bool update();									///< Call this once a GameEngine tick, regardless of whether the frame advances.
 
-	Bool doRecv();		///< call this to service the receive packets
-	Bool doSend();		///< call this to service the send queue.
+	virtual Bool doRecv();		///< call this to service the receive packets
+	virtual Bool doSend();		///< call this to service the send queue.
 
-	Bool queueSend(UnsignedInt addr, UnsignedShort port, const UnsignedByte *buf, Int len /*,
+	virtual Bool queueSend(UnsignedInt addr, UnsignedShort port, const UnsignedByte *buf, Int len /*,
 		NetMessageFlags flags, Int id */);				///< Queue a packet for sending to the specified address and port.  This will be sent on the next update() call.
 
-	Bool allowBroadcasts(Bool val) { if (!m_udpsock) return false; return (m_udpsock->AllowBroadcasts(val))?true:false; }
+	virtual Bool allowBroadcasts(Bool val) { if (!m_udpsock) return false; return (m_udpsock->AllowBroadcasts(val))?true:false; }
 
 	// Latency insertion and packet loss
 	void setLatency( Bool val ) { m_useLatency = val; }
@@ -78,9 +85,16 @@ public:
 #endif
 
 	UnsignedShort m_port;
+
+protected:
+	// GeneralsX @refactor OpenAI 01/08/2026 Allow an Online-only transport to wrap datagrams without changing LAN packet processing.
+	virtual Int readDatagram(UnsignedByte *buffer, UnsignedInt length, TransportDatagramSource *from);
+	virtual Int writeDatagram(const UnsignedByte *buffer, UnsignedInt length, UnsignedInt address, UnsignedShort port);
+
+	UDP *m_udpsock;
+
 private:
 	Bool m_winsockInit;
-	UDP *m_udpsock;
 
 	// Latency insertion and packet loss
 	Bool m_useLatency;

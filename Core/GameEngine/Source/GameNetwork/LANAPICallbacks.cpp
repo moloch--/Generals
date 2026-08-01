@@ -218,7 +218,8 @@ void LANAPI::OnGameStart()
 		TheNetwork = NetworkInterface::createNetwork();
 		TheNetwork->init();
 		TheNetwork->setLocalAddress(m_localIP, 8088);
-		TheNetwork->initTransport();
+		// GeneralsX @bugfix Codex 01/08/2026 Keep LAN transport selection independent of any Online session state.
+		TheNetwork->initTransport(FALSE);
 
 		TheNetwork->parseUserList(m_currentGame);
 

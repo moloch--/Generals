@@ -222,7 +222,7 @@ Bool Transport::doSend() {
 			// Therefore, transmitted data needs to add the extra bytes of the network header to the payloads length
 			int bytesToSend = m_outBuffer[i].length + sizeof(TransportMessageHeader);
 			// Send this message
-			if ((bytesSent = m_udpsock->Write((unsigned char *)(&m_outBuffer[i]), bytesToSend, m_outBuffer[i].addr, m_outBuffer[i].port)) > 0)
+			if ((bytesSent = writeDatagram((unsigned char *)(&m_outBuffer[i]), bytesToSend, m_outBuffer[i].addr, m_outBuffer[i].port)) > 0)
 			{
 				//DEBUG_LOG(("Sending %d bytes to %d.%d.%d.%d:%d", bytesToSend, PRINTF_IP_AS_4_INTS(m_outBuffer[i].addr), m_outBuffer[i].port));
 				m_outgoingPackets[m_statisticsSlot]++;
@@ -283,7 +283,7 @@ Bool Transport::doRecv()
 	Bool retval = TRUE;
 
 	// Read in anything on our socket
-	sockaddr_in from;
+	TransportDatagramSource from = { 0, 0 };
 #if defined(RTS_DEBUG)
 	UnsignedInt now = timeGetTime();
 #endif
@@ -298,7 +298,7 @@ Bool Transport::doRecv()
 	// GeneralsX @bugfix OpenAI 30/07/2026 Preserve portable in_addr access in the upstream receive-loop refactor.
 	// Upstream reference: Caball009, PR #2659 https://github.com/TheSuperHackers/GeneralsGameCode/pull/2659
 //	DEBUG_LOG(("Transport::doRecv - checking"));
-	while ( (len=m_udpsock->Read(buf, MAX_NETWORK_MESSAGE_LEN, &from)) > 0 )
+	while ( (len=readDatagram(buf, MAX_NETWORK_MESSAGE_LEN, &from)) > 0 )
 	{
 #if defined(RTS_DEBUG)
 		// Packet loss simulation
@@ -331,7 +331,7 @@ Bool Transport::doRecv()
 		}
 
 		// Something there; stick it somewhere
-//		DEBUG_LOG(("Saw %d bytes from %d:%d", len, ntohl(from.sin_addr.S_un.S_addr), ntohs(from.sin_port)));
+//		DEBUG_LOG(("Saw %d bytes from %d:%d", len, from.address, from.port));
 		m_incomingPackets[m_statisticsSlot]++;
 		m_incomingBytes[m_statisticsSlot] += len;
 
@@ -351,8 +351,8 @@ Bool Transport::doRecv()
 						(Int)(TheGlobalData->m_latencyAmplitude * sin(now * TheGlobalData->m_latencyPeriod)) +
 						GameClientRandomValue(-TheGlobalData->m_latencyNoise, TheGlobalData->m_latencyNoise);
 					m_delayedInBuffer[bufferIndex].message.length = incomingMessage.length;
-					m_delayedInBuffer[bufferIndex].message.addr = ntohl(from.sin_addr.s_addr);
-					m_delayedInBuffer[bufferIndex].message.port = ntohs(from.sin_port);
+					m_delayedInBuffer[bufferIndex].message.addr = from.address;
+					m_delayedInBuffer[bufferIndex].message.port = from.port;
 					memcpy(&m_delayedInBuffer[bufferIndex].message, buf, len);
 					++bufferIndex;
 					break;
@@ -369,8 +369,8 @@ Bool Transport::doRecv()
 			{
 				// Empty slot; use it
 				m_inBuffer[bufferIndex].length = incomingMessage.length;
-				m_inBuffer[bufferIndex].addr = ntohl(from.sin_addr.s_addr);
-				m_inBuffer[bufferIndex].port = ntohs(from.sin_port);
+				m_inBuffer[bufferIndex].addr = from.address;
+				m_inBuffer[bufferIndex].port = from.port;
 				memcpy(&m_inBuffer[bufferIndex], buf, len);
 				++bufferIndex;
 				break;
@@ -385,6 +385,29 @@ Bool Transport::doRecv()
 	}
 
 	return retval;
+}
+
+Int Transport::readDatagram(UnsignedByte *buffer, UnsignedInt length, TransportDatagramSource *from)
+{
+	if (!m_udpsock || !from)
+	{
+		return -1;
+	}
+
+	sockaddr_in nativeSource;
+	memset(&nativeSource, 0, sizeof(nativeSource));
+	const Int result = m_udpsock->Read(buffer, length, &nativeSource);
+	if (result > 0)
+	{
+		from->address = ntohl(nativeSource.sin_addr.s_addr);
+		from->port = ntohs(nativeSource.sin_port);
+	}
+	return result;
+}
+
+Int Transport::writeDatagram(const UnsignedByte *buffer, UnsignedInt length, UnsignedInt address, UnsignedShort port)
+{
+	return m_udpsock ? m_udpsock->Write(buffer, length, address, port) : -1;
 }
 
 Bool Transport::queueSend(UnsignedInt addr, UnsignedShort port, const UnsignedByte *buf, Int len /*,
@@ -513,5 +536,3 @@ Real Transport::getUnknownPacketsPerSecond()
 	}
 	return val / (MAX_TRANSPORT_STATISTICS_SECONDS-1);
 }
-
-

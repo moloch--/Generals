@@ -21,6 +21,24 @@ if(NOT DEFINED CACHE{SAGE_UPDATE_CHECK})
     set(SAGE_UPDATE_CHECK "${SAGE_USE_SDL3}" CACHE BOOL "Enable in-game update check via GitHub Releases API")
 endif()
 
+# GeneralsX @feature Codex 01/08/2026 Enable verified TLS for the custom Online control plane on modern builds.
+# VC6 retains the legacy Online path; iOS and the exploratory MinGW preset can compile plaintext guest mode.
+if(NOT DEFINED CACHE{SAGE_ONLINE_TLS})
+    if(IS_VS6_BUILD OR CMAKE_SYSTEM_NAME STREQUAL "iOS")
+        set(_sage_online_tls_default OFF)
+    else()
+        set(_sage_online_tls_default "${SAGE_USE_SDL3}")
+    endif()
+    set(SAGE_ONLINE_TLS "${_sage_online_tls_default}" CACHE BOOL "Enable verified TLS for the custom Online service")
+    unset(_sage_online_tls_default)
+endif()
+
+if(SAGE_ONLINE_TLS AND IS_VS6_BUILD)
+    message(FATAL_ERROR "SAGE_ONLINE_TLS requires a modern compiler; the VC6 preset retains the legacy Online client")
+elseif(SAGE_ONLINE_TLS AND CMAKE_SYSTEM_NAME STREQUAL "iOS")
+    message(FATAL_ERROR "SAGE_ONLINE_TLS is not supported by the iOS dependency profile")
+endif()
+
 # macOS port option (Phase 5)
 option(SAGE_USE_MOLTENVK "Use MoltenVK for Vulkan on macOS (Phase 5 macOS port)" OFF)
 
@@ -46,6 +64,7 @@ add_feature_info(FFmpegSupport RTS_BUILD_OPTION_FFMPEG "Building with FFmpeg sup
 add_feature_info(SDL3Windowing SAGE_USE_SDL3 "Using SDL3 for windowing (Linux)")
 add_feature_info(OpenALAudio SAGE_USE_OPENAL "Using OpenAL for audio (Linux)")
 add_feature_info(UpdateCheck SAGE_UPDATE_CHECK "In-game update check via GitHub Releases API")
+add_feature_info(OnlineTLS SAGE_ONLINE_TLS "Verified TLS for the custom Online service")
 add_feature_info(SagePatch RTS_BUILD_OPTION_SAGE_PATCH "Build SagePatch QoL extras (macOS)")
 
 set(RTS_BUILD_OUTPUT_SUFFIX "" CACHE STRING "Suffix appended to output names of installable targets")
@@ -125,6 +144,16 @@ endif()
 if(SAGE_UPDATE_CHECK)
     target_compile_definitions(core_config INTERFACE SAGE_UPDATE_CHECK)
     message(STATUS "In-game update checker enabled")
+endif()
+
+# GeneralsX @build Codex 01/08/2026 Keep the replacement Online client out of the VC6 retail reference build.
+if(NOT IS_VS6_BUILD)
+    target_compile_definitions(core_config INTERFACE SAGE_CUSTOM_ONLINE)
+endif()
+
+if(SAGE_ONLINE_TLS)
+    target_compile_definitions(core_config INTERFACE SAGE_ONLINE_TLS)
+    message(STATUS "Verified Online TLS transport enabled")
 endif()
 
 if(SAGE_USE_GLM)

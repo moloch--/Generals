@@ -1149,6 +1149,27 @@ set(GAMEENGINE_SRC
 #    Source/Precompiled/PreRTS.cpp
 )
 
+if(NOT IS_VS6_BUILD)
+    # GeneralsX @build Codex 01/08/2026 Compile native Online implementations from the platform layer.
+    set(GENERALSX_ONLINE_PLATFORM_SOURCE_DIR
+        "${CMAKE_SOURCE_DIR}/Core/GameEngineDevice/Source/Platform/GameNetwork"
+    )
+    list(APPEND GAMEENGINE_SRC
+        Include/GameNetwork/Online/OnlineControlClient.h
+        Include/GameNetwork/Online/OnlineEndpoint.h
+        Include/GameNetwork/Online/OnlineGameOptions.h
+        Include/GameNetwork/Online/OnlineGameSpyQueues.h
+        Include/GameNetwork/Online/OnlineRelayTransport.h
+        Include/GameNetwork/Online/OnlineSessionState.h
+        ${GENERALSX_ONLINE_PLATFORM_SOURCE_DIR}/OnlineControlClient.cpp
+        ${GENERALSX_ONLINE_PLATFORM_SOURCE_DIR}/OnlineRelayTransport.cpp
+        ${GENERALSX_ONLINE_PLATFORM_SOURCE_DIR}/OnlineSessionState.cpp
+        Source/GameNetwork/Online/OnlineEndpoint.cpp
+        Source/GameNetwork/Online/OnlineGameOptions.cpp
+        Source/GameNetwork/Online/OnlineGameSpyQueues.cpp
+    )
+endif()
+
 if(RTS_GAMEMEMORY_ENABLE)
     # Uses the original Game Memory implementation.
     list(APPEND GAMEENGINE_SRC
@@ -1180,6 +1201,10 @@ target_include_directories(corei_gameengine_private INTERFACE
 target_link_libraries(corei_gameengine_private INTERFACE
     corei_always
 )
+
+if(NOT IS_VS6_BUILD)
+    target_link_libraries(corei_gameengine_private INTERFACE nlohmann_json::nlohmann_json)
+endif()
 
 target_compile_definitions(corei_gameengine_private INTERFACE
     IG_DEBUG_STACKTRACE
@@ -1215,5 +1240,37 @@ if(SAGE_UPDATE_CHECK)
     target_sources(corei_gameengine_private INTERFACE
         ${CMAKE_CURRENT_SOURCE_DIR}/Source/Common/UpdateChecker.cpp
     )
-    target_link_libraries(corei_gameengine_public INTERFACE CURL::libcurl SDL3::SDL3)
+    target_link_libraries(corei_gameengine_public INTERFACE SDL3::SDL3)
+endif()
+
+# GeneralsX @build Codex 01/08/2026 Share libcurl between the updater and strict Online CONNECT_ONLY TLS transport.
+if(SAGE_UPDATE_CHECK OR SAGE_ONLINE_TLS)
+    target_link_libraries(corei_gameengine_public INTERFACE CURL::libcurl)
+endif()
+
+# GeneralsX @build Codex 01/08/2026 Compile the pure Online configuration tests without the full game runtime.
+if(RTS_BUILD_ONLINE_TESTS AND NOT IS_VS6_BUILD)
+    add_executable(generalsx_online_endpoint_tests
+        Tests/GameNetwork/Online/OnlineEndpointTest.cpp
+        ${GENERALSX_ONLINE_PLATFORM_SOURCE_DIR}/OnlineControlClient.cpp
+        ${GENERALSX_ONLINE_PLATFORM_SOURCE_DIR}/OnlineSessionState.cpp
+        Source/GameNetwork/Online/OnlineEndpoint.cpp
+        Source/GameNetwork/Online/OnlineGameOptions.cpp
+    )
+    target_include_directories(generalsx_online_endpoint_tests PRIVATE
+        Include
+        ${CMAKE_SOURCE_DIR}/Core/Libraries/Include
+        ${CMAKE_SOURCE_DIR}/Dependencies/Utility
+    )
+    target_compile_features(generalsx_online_endpoint_tests PRIVATE cxx_std_20)
+    find_package(Threads REQUIRED)
+    target_link_libraries(generalsx_online_endpoint_tests PRIVATE Threads::Threads)
+    if(SAGE_ONLINE_TLS)
+        target_compile_definitions(generalsx_online_endpoint_tests PRIVATE SAGE_ONLINE_TLS)
+        target_link_libraries(generalsx_online_endpoint_tests PRIVATE CURL::libcurl)
+    endif()
+    if(WIN32)
+        target_link_libraries(generalsx_online_endpoint_tests PRIVATE ws2_32)
+    endif()
+    add_test(NAME generalsx_online_endpoint_tests COMMAND generalsx_online_endpoint_tests)
 endif()

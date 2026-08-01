@@ -35,6 +35,10 @@
 #include "Common/PlayerTemplate.h"
 #include "GameNetwork/GameSpy/PersistentStorageThread.h"
 #include "GameNetwork/GameSpy/PeerDefs.h"
+#ifdef SAGE_CUSTOM_ONLINE
+#include "GameNetwork/Online/OnlineEndpoint.h"
+#include "GameNetwork/Online/OnlineGameSpyQueues.h"
+#endif
 
 #include "WWLib/mutex.h"
 #include "WWLib/thread.h"
@@ -413,6 +417,11 @@ private:
 
 GameSpyPSMessageQueueInterface* GameSpyPSMessageQueueInterface::createNewMessageQueue()
 {
+#ifdef SAGE_CUSTOM_ONLINE
+	// GeneralsX @feature Codex 01/08/2026 Back the Online-only stats queue with the GeneralsX service.
+	if (GeneralsOnline::GetOnlineEndpoint().configured)
+		return GeneralsOnline::CreateOnlinePersistentStorageMessageQueue();
+#endif
 	return NEW GameSpyPSMessageQueue;
 }
 

@@ -35,6 +35,10 @@
 #include "GameNetwork/GameSpy/PeerThread.h"
 #include "GameNetwork/GameSpy/PersistentStorageThread.h"
 #include "GameNetwork/GameSpy/ThreadUtils.h"
+#ifdef SAGE_CUSTOM_ONLINE
+#include "GameNetwork/Online/OnlineEndpoint.h"
+#include "GameNetwork/Online/OnlineGameSpyQueues.h"
+#endif
 
 #include "WWLib/mutex.h"
 #include "WWLib/thread.h"
@@ -77,6 +81,11 @@ private:
 
 GameSpyBuddyMessageQueueInterface* GameSpyBuddyMessageQueueInterface::createNewMessageQueue()
 {
+#ifdef SAGE_CUSTOM_ONLINE
+	// GeneralsX @feature Codex 01/08/2026 Route only explicitly configured Online sessions to the replacement service.
+	if (GeneralsOnline::GetOnlineEndpoint().configured)
+		return GeneralsOnline::CreateOnlineBuddyMessageQueue();
+#endif
 	return NEW GameSpyBuddyMessageQueue;
 }
 
@@ -680,4 +689,3 @@ void BuddyThreadClass::statusCallback( GPConnection *con, GPRecvBuddyStatusArg *
 
 
 //-------------------------------------------------------------------------
-

@@ -35,6 +35,9 @@
 #include "GameClient/TerrainVisual.h" // for TERRAIN_LOD_MIN definition
 #include "GameClient/GameText.h"
 #include "GameNetwork/NetworkDefs.h"
+#ifdef SAGE_CUSTOM_ONLINE
+#include "GameNetwork/Online/OnlineEndpoint.h"
+#endif
 #include "WWLib/trim.h"
 
 #include <string>
@@ -128,6 +131,32 @@ Int parseWin(char *args[], int)
 	fprintf(stderr, "[DEBUG-WIN] parseWin() called: m_windowed set to TRUE\n");
 	return 1;
 }
+
+#ifdef SAGE_CUSTOM_ONLINE
+// GeneralsX @feature Codex 01/08/2026 Select the opt-in Online service endpoint without changing legacy or LAN defaults.
+Int parseOnlineServer(char *args[], int argc)
+{
+	if (argc <= 1 || args[1] == nullptr || args[1][0] == '\0' || args[1][0] == '-')
+	{
+		fprintf(stderr, "ERROR: -onlineServer requires [tls://]host[:port]; use tls:// for account login\n");
+		exit(1);
+	}
+
+	std::string error;
+	if (!GeneralsOnline::ConfigureOnlineEndpoint(args[1], &error))
+	{
+		fprintf(stderr, "ERROR: Invalid -onlineServer value '%s': %s\n", args[1], error.c_str());
+		exit(1);
+	}
+	else
+	{
+		const GeneralsOnline::OnlineEndpoint &endpoint = GeneralsOnline::GetOnlineEndpoint();
+		fprintf(stderr, "INFO: Online server configured as %s%s:%u\n",
+			endpoint.useTLS ? "tls://" : "", endpoint.host.c_str(), static_cast<unsigned int>(endpoint.controlPort));
+	}
+	return 2;
+}
+#endif
 
 //=============================================================================
 //=============================================================================
@@ -1164,6 +1193,9 @@ static CommandLineParam paramsForStartup[] =
 // These Params are parsed during Engine Init before INI data is loaded
 static CommandLineParam paramsForEngineInit[] =
 {
+#ifdef SAGE_CUSTOM_ONLINE
+	{ "-onlineServer", parseOnlineServer },
+#endif
 	{ "-nologo", parseNoLogo }, // TheSuperHackers @tweak Is now available in Release builds.
 	{ "-noshellmap", parseNoShellMap },
 	{ "-noShellAnim", parseNoWindowAnimation }, // TheSuperHackers @tweak Is now available in Release builds.

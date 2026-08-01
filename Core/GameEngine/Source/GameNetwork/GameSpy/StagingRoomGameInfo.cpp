@@ -47,6 +47,10 @@
 #include "GameNetwork/GameSpyOverlay.h"
 #include "GameNetwork/NAT.h"
 #include "GameNetwork/NetworkInterface.h"
+#ifdef SAGE_CUSTOM_ONLINE
+#include "GameNetwork/Online/OnlineEndpoint.h"
+#include "GameNetwork/Online/OnlineSessionState.h"
+#endif
 
 
 // GameSpyGameSlot -------------------------------------------
@@ -534,10 +538,34 @@ void GameSpyStagingRoom::startGame(Int gameID)
 {
 	DEBUG_ASSERTCRASH(m_inGame, ("Starting a game while not in game"));
 	DEBUG_LOG(("GameSpyStagingRoom::startGame - game id = %d", gameID));
+
+#ifdef SAGE_CUSTOM_ONLINE
+	const Bool useOnlineRelay = GeneralsOnline::GetOnlineEndpoint().configured;
+	const GeneralsOnline::OnlineSessionSnapshot onlineSession = GeneralsOnline::GetOnlineSessionSnapshot();
+	if (useOnlineRelay && !onlineSession.ready)
+	{
+		// The host asks the control service to start immediately before this
+		// call. Its game.started event invokes startGame again once every client
+		// has an individual relay credential.
+		DEBUG_LOG(("GameSpyStagingRoom::startGame - waiting for Online relay credentials"));
+		return;
+	}
+#else
+	const Bool useOnlineRelay = FALSE;
+#endif
+
 	DEBUG_ASSERTCRASH(m_transport == nullptr, ("m_transport is not null when it should be"));
 	DEBUG_ASSERTCRASH(TheNAT == nullptr, ("TheNAT is not null when it should be"));
 
 	UnsignedInt localIP = TheGameSpyInfo->getInternalIP();
+#ifdef SAGE_CUSTOM_ONLINE
+	if (useOnlineRelay)
+	{
+		const std::uint32_t virtualAddress =
+			onlineSession.virtualIPv4ByServiceSlot[onlineSession.localServiceSlot];
+		localIP = GeneralsOnline::OnlineIPv4NetworkToHost(virtualAddress);
+	}
+#endif
 	setLocalIP(localIP);
 
 	delete TheNAT;
@@ -579,7 +607,12 @@ void GameSpyStagingRoom::startGame(Int gameID)
 	}
 
 //#if defined(RTS_DEBUG)
-	if (numHumans < 2)
+	// GeneralsX @feature OpenAI 01/08/2026 A configured Online match already has an authenticated relay path; never enter legacy NAT negotiation.
+	if (useOnlineRelay)
+	{
+		launchGame();
+	}
+	else if (numHumans < 2)
 	{
 		launchGame();
 		if (TheGameSpyInfo)
@@ -816,11 +849,28 @@ void GameSpyStagingRoom::launchGame()
 	TheNetwork = NetworkInterface::createNetwork();
 	TheNetwork->init();
 
+#ifdef SAGE_CUSTOM_ONLINE
+	// GeneralsX @bugfix Codex 01/08/2026 Select the relay explicitly so a stale Online session can never redirect LAN.
+	const Bool useOnlineRelay = GeneralsOnline::GetOnlineEndpoint().configured;
+#else
+	const Bool useOnlineRelay = FALSE;
+#endif
 	TheNetwork->setLocalAddress(getLocalIP(), (TheNAT)?TheNAT->getSlotPort(getLocalSlotNum()):8888);
 	if (TheNAT)
 		TheNetwork->attachTransport(TheNAT->getTransport());
-	else
-		TheNetwork->initTransport();
+	else if (!TheNetwork->initTransport(useOnlineRelay))
+	{
+		// GeneralsX @bugfix OpenAI 01/08/2026 Never enter map loading with an unusable Online relay socket.
+		delete TheNetwork;
+		TheNetwork = nullptr;
+#ifdef SAGE_CUSTOM_ONLINE
+		GeneralsOnline::ClearOnlineSession();
+#endif
+		GSMessageBoxOk(TheGameText->fetch("GUI:Error"), TheGameText->fetch("GUI:JoinFailedNoConnection"));
+		void PopBackToLobby();
+		PopBackToLobby();
+		return;
+	}
 
 	TheNetwork->parseUserList(this);
 

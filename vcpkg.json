@@ -21,7 +21,8 @@
       },
       {
         "name": "curl",
-        "platform": "!windows",
+        "default-features": false,
+        "platform": "!ios",
         "features": ["ssl"]
       },
       {

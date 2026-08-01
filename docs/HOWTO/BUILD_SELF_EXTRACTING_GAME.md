@@ -412,6 +412,10 @@ retail-sized `go:embed` payload. `windows/386` also cross-builds for small
 payloads. The stage may not contain symlinks. Neither choice makes the current
 game runtime ready: it still imports `d3dx8d.dll`, and its generated Bink and
 Miles DLLs are deliberate null implementations.
+An Online/TLS-capable game built with `win32-vcpkg` additionally requires the
+x86 Release `libcurl.dll`, `zlib1.dll`, `MSVCP140.dll`,
+`MSVCP140_ATOMIC_WAIT.dll`, and `VCRUNTIME140.dll` in a self-contained stage
+beside `generalszh.exe`; curl uses Schannel and does not require OpenSSL DLLs.
 They export all names the current game imports, but audio/video behavior is
 unimplemented and compatibility with retail DLL implementations is
 unvalidated. Do not distribute or describe the Windows artifact as a working

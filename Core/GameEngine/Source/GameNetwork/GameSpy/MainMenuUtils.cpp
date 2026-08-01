@@ -51,6 +51,9 @@
 #include "GameNetwork/GameSpy/MainMenuUtils.h"
 #include "GameNetwork/GameSpy/PeerDefs.h"
 #include "GameNetwork/GameSpy/PeerThread.h"
+#ifdef SAGE_CUSTOM_ONLINE
+#include "GameNetwork/Online/OnlineEndpoint.h"
+#endif
 
 #include "WWDownload/Registry.h"
 #include "WWDownload/urlBuilder.h"
@@ -821,6 +824,28 @@ void StopAsyncDNSCheck()
 
 void StartPatchCheck()
 {
+#ifdef SAGE_CUSTOM_ONLINE
+	// GeneralsX @feature Codex 01/08/2026 Bypass retired EA patch/MOTD services only for the explicit Online server override.
+	if (GeneralsOnline::GetOnlineEndpoint().configured)
+	{
+		++timeThroughOnline;
+		checkingForPatchBeforeGameSpy = FALSE;
+		cantConnectBeforeOnline = FALSE;
+		mustDownloadPatch = FALSE;
+		checksLeftBeforeOnline = 0;
+		s_asyncDNSLookupInProgress = FALSE;
+		queuedDownloads.clear();
+
+		delete[] MOTDBuffer;
+		MOTDBuffer = nullptr;
+		delete[] configBuffer;
+		configBuffer = nullptr;
+
+		startOnline();
+		return;
+	}
+#endif
+
 	checkingForPatchBeforeGameSpy = TRUE;
 	cantConnectBeforeOnline = FALSE;
 	timeThroughOnline++;

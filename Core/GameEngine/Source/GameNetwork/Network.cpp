@@ -162,7 +162,7 @@ public:
 	virtual Int getSlotAverageFPS(Int slot) override;
 
 	virtual void attachTransport(Transport *transport) override;
-	virtual void initTransport() override;
+	virtual Bool initTransport(Bool useOnlineRelay) override;
 
 	virtual void setSawCRCMismatch() override;
 	virtual Bool sawCRCMismatch() override { return m_sawCRCMismatch; }
@@ -438,11 +438,12 @@ void Network::setLocalAddress(UnsignedInt ip, UnsignedInt port) {
 /**
  * Tell the network to initialize the transport object
  */
-void Network::initTransport() {
+Bool Network::initTransport(Bool useOnlineRelay) {
 	DEBUG_ASSERTCRASH(m_conMgr != nullptr, ("Connection manager does not exist."));
 	if (m_conMgr != nullptr) {
-		m_conMgr->initTransport();
+		return m_conMgr->initTransport(useOnlineRelay);
 	}
+	return FALSE;
 }
 
 void Network::attachTransport(Transport *transport) {

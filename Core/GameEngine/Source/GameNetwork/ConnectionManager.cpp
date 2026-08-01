@@ -46,6 +46,9 @@
 #include "GameNetwork/LANAPICallbacks.h"
 #include "GameNetwork/NAT.h"
 #include "GameNetwork/NetCommandWrapperList.h"
+#ifdef SAGE_CUSTOM_ONLINE
+#include "GameNetwork/Online/OnlineRelayTransport.h"
+#endif
 #include "GameNetwork/networkutil.h"
 #include "GameLogic/GameLogic.h"
 #include "GameLogic/ScriptActions.h"
@@ -1582,14 +1585,27 @@ void ConnectionManager::setLocalAddress(UnsignedInt ip, UnsignedInt port) {
 /**
  * Initialize the transport object
  */
-void ConnectionManager::initTransport() {
+Bool ConnectionManager::initTransport(Bool useOnlineRelay) {
 	DEBUG_ASSERTCRASH((m_transport == nullptr), ("m_transport already exists when trying to init it."));
 	DEBUG_LOG(("ConnectionManager::initTransport - Initializing Transport"));
 
 	delete m_transport;
+#ifdef SAGE_CUSTOM_ONLINE
+	// GeneralsX @feature OpenAI 01/08/2026 Select the authenticated relay only for an active Online service match.
+	if (useOnlineRelay)
+	{
+		m_transport = GeneralsOnline::CreateOnlineRelayTransport();
+	}
+	else
+	{
+		m_transport = new Transport;
+	}
+#else
 	m_transport = new Transport;
+#endif
 	m_transport->reset();
-	m_transport->init(m_localAddr, m_localPort);
+	// GeneralsX @bugfix OpenAI 01/08/2026 Let Online launch abort when relay DNS, socket setup, or the initial authenticated bind fails.
+	return m_transport->init(m_localAddr, m_localPort);
 }
 
 /**

@@ -102,7 +102,7 @@ public:
 	virtual Int getSlotAverageFPS(Int slot) = 0;
 
 	virtual void attachTransport(Transport *transport) = 0;
-	virtual void initTransport() = 0;
+	virtual Bool initTransport(Bool useOnlineRelay) = 0;
 	virtual Bool sawCRCMismatch() = 0;
 	virtual void setSawCRCMismatch() = 0;
 

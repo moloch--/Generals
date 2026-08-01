@@ -40,6 +40,10 @@
 #include "GameNetwork/GameSpy/PeerThread.h"
 #include "GameNetwork/GameSpy/PersistentStorageThread.h"
 #include "GameNetwork/GameSpy/ThreadUtils.h"
+#ifdef SAGE_CUSTOM_ONLINE
+#include "GameNetwork/Online/OnlineEndpoint.h"
+#include "GameNetwork/Online/OnlineGameSpyQueues.h"
+#endif
 
 #include "WWLib/strtok_r.h"
 #include "WWLib/mutex.h"
@@ -165,6 +169,11 @@ private:
 
 GameSpyPeerMessageQueueInterface* GameSpyPeerMessageQueueInterface::createNewMessageQueue()
 {
+#ifdef SAGE_CUSTOM_ONLINE
+	// GeneralsX @feature Codex 01/08/2026 Keep legacy GameSpy behavior unless a replacement endpoint was requested.
+	if (GeneralsOnline::GetOnlineEndpoint().configured)
+		return GeneralsOnline::CreateOnlinePeerMessageQueue();
+#endif
 	return NEW GameSpyPeerMessageQueue;
 }
 
@@ -2988,4 +2997,3 @@ static void listingGamesCallback(PEER peer, PEERBool success, const char * name,
 }
 
 //-------------------------------------------------------------------------
-

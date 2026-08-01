@@ -1726,6 +1726,32 @@ void WOLGameSetupMenuUpdate( WindowLayout * layout, void *userData)
 				{
 					// oops - we've not heard from the qr server.  bail.
 					TheGameSpyInfo->addText(TheGameText->fetch("GUI:GSFailedToHost"), GameSpyColor[GSCOLOR_DEFAULT], nullptr);
+					if (!resp.commandOptions.empty())
+					{
+						UnicodeString detail;
+						detail.translate(resp.commandOptions.c_str());
+						TheGameSpyInfo->addText(detail, GameSpyColor[GSCOLOR_DEFAULT], nullptr);
+					}
+					if (resp.command == "TERMINAL")
+					{
+						// GeneralsX @bugfix Codex 01/08/2026 A coordinated pre-launch failure dissolved this room; return the host to Online.
+						buttonPushed = true;
+						if (TheGameSpyInfo->getCurrentStagingRoom())
+							TheGameSpyInfo->getCurrentStagingRoom()->reset();
+						TheGameSpyInfo->leaveStagingRoom();
+						nextScreen = "Menus/WOLCustomLobby.wnd";
+						TheShell->pop();
+					}
+					else
+					{
+						// GeneralsX @bugfix Codex 01/08/2026 Recover controls after an asynchronous Online start rejection.
+						buttonBack->winEnable(TRUE);
+						buttonStart->winEnable(TRUE);
+						GameWindow *buttonBuddy = TheWindowManager->winGetWindowFromId(nullptr,
+							NAMEKEY("GameSpyGameOptionsMenu.wnd:ButtonCommunicator"));
+						if (buttonBuddy)
+							buttonBuddy->winEnable(TRUE);
+					}
 				}
 				break;
 			case PeerResponse::PEERRESPONSE_GAMESTART:
@@ -2875,5 +2901,3 @@ WindowMsgHandledType WOLGameSetupMenuSystem( GameWindow *window, UnsignedInt msg
 	}
 	return MSG_HANDLED;
 }
-
-
