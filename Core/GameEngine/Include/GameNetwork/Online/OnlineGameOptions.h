@@ -81,6 +81,20 @@ struct OnlineGameBrowserSummary
 	OnlineGameCompatibility compatibility;
 };
 
+struct OnlineGameMemberSummary
+{
+	std::uint64_t userId = 0;
+	std::string name;
+	bool host = false;
+	bool ready = false;
+	int slot = -1;
+};
+
+/** Player-info callbacks are needed for new identities/topology, not repeated snapshots or readiness alone. */
+bool ShouldEmitOnlinePlayerInfo(
+	const OnlineGameMemberSummary *previous,
+	const OnlineGameMemberSummary &current);
+
 enum class OnlineGameBrowserChangeType
 {
 	Add,

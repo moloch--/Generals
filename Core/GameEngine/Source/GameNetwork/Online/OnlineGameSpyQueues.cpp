@@ -323,6 +323,11 @@ ServiceMember ParseMember(const Json &value)
 	return member;
 }
 
+OnlineGameMemberSummary MemberSummary(const ServiceMember &member)
+{
+	return OnlineGameMemberSummary{member.userId, member.name, member.host, member.ready, member.slot};
+}
+
 ServiceGame ParseGame(const Json &value)
 {
 	ServiceGame game;
@@ -1575,7 +1580,17 @@ void OnlineServiceSession::applyGameSnapshotLocked(const ServiceGame &game, bool
 		auto found = previous.find(member.userId);
 		if (found == previous.end() && !(suppressLocalJoin && member.userId == m_localUserId))
 			emitPlayerLocked(member, StagingRoom, PeerResponse::PEERRESPONSE_PLAYERJOIN);
-		emitPlayerLocked(member, StagingRoom, PeerResponse::PEERRESPONSE_PLAYERINFO);
+		const OnlineGameMemberSummary currentSummary = MemberSummary(member);
+		OnlineGameMemberSummary previousSummary;
+		const OnlineGameMemberSummary *previousSummaryPointer = nullptr;
+		if (found != previous.end())
+		{
+			previousSummary = MemberSummary(found->second);
+			previousSummaryPointer = &previousSummary;
+		}
+		// GeneralsX @bugfix Codex 01/08/2026 Do not turn echoed snapshots into host option/chat feedback loops.
+		if (ShouldEmitOnlinePlayerInfo(previousSummaryPointer, currentSummary))
+			emitPlayerLocked(member, StagingRoom, PeerResponse::PEERRESPONSE_PLAYERINFO);
 		if (found != previous.end() && found->second.ready != member.ready)
 		{
 			emitPlayerLocked(member, StagingRoom, PeerResponse::PEERRESPONSE_PLAYERCHANGEDFLAGS);

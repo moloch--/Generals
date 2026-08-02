@@ -303,6 +303,14 @@ std::uint32_t ProjectOnlineExeCRC(
 	return IsOnlineGameCompatible(local, remote) ? localExeCRC : localExeCRC ^ UINT32_C(0xffffffff);
 }
 
+bool ShouldEmitOnlinePlayerInfo(
+	const OnlineGameMemberSummary *previous,
+	const OnlineGameMemberSummary &current)
+{
+	return previous == nullptr || previous->userId != current.userId || previous->name != current.name ||
+		previous->host != current.host || previous->slot != current.slot;
+}
+
 std::vector<OnlineGameBrowserChange> DiffOnlineGameBrowserSummaries(
 	const std::vector<OnlineGameBrowserSummary> &previous,
 	const std::vector<OnlineGameBrowserSummary> &current)

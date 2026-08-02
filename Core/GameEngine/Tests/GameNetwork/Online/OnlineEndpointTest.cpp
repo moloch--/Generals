@@ -336,6 +336,40 @@ void TestGameBrowserDiff()
 		"a compatibility tuple change was omitted from the browser delta");
 }
 
+// GeneralsX @test Codex 01/08/2026 Prevent authoritative staging snapshots from feeding host options back forever.
+void TestGameMemberInfoDiff()
+{
+	const GeneralsOnline::OnlineGameMemberSummary original{
+		UINT64_C(42), "Host", true, false, 0,
+	};
+	Expect(GeneralsOnline::ShouldEmitOnlinePlayerInfo(nullptr, original),
+		"a new staging member did not produce player info");
+
+	auto changed = original;
+	Expect(!GeneralsOnline::ShouldEmitOnlinePlayerInfo(&original, changed),
+		"an identical repeated staging snapshot produced player info");
+	changed.ready = true;
+	Expect(!GeneralsOnline::ShouldEmitOnlinePlayerInfo(&original, changed),
+		"a readiness-only staging change produced player info instead of the dedicated readiness path");
+
+	changed = original;
+	changed.userId = 43;
+	Expect(GeneralsOnline::ShouldEmitOnlinePlayerInfo(&original, changed),
+		"a replacement staging identity did not produce player info");
+	changed = original;
+	changed.name = "Renamed Host";
+	Expect(GeneralsOnline::ShouldEmitOnlinePlayerInfo(&original, changed),
+		"a staging display-name change did not produce player info");
+	changed = original;
+	changed.host = false;
+	Expect(GeneralsOnline::ShouldEmitOnlinePlayerInfo(&original, changed),
+		"a staging host-role change did not produce player info");
+	changed = original;
+	changed.slot = 1;
+	Expect(GeneralsOnline::ShouldEmitOnlinePlayerInfo(&original, changed),
+		"a staging slot change did not produce player info");
+}
+
 void TestProfileIdentityMapping()
 {
 	Expect(GeneralsOnline::OnlineProfileIdForUserId(1) == 1,
@@ -528,6 +562,7 @@ int main()
 	TestGameEndDisposition();
 	TestGameCompatibility();
 	TestGameBrowserDiff();
+	TestGameMemberInfoDiff();
 	TestProfileIdentityMapping();
 	TestLegacyResultsParser();
 #if !defined(_WIN32) || defined(_MSC_VER)
