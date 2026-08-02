@@ -320,12 +320,104 @@ void TestGameEndDisposition()
 		"started-game connection loss did not terminate the relay session visibly");
 }
 
+// GeneralsX @test OpenAI 02/08/2026 Execute the production staging-exit policy against real relay session state.
+void TestStagingRoomExitLifecycle()
+{
+	auto configureRelaySession = []() {
+		std::array<std::uint8_t, GeneralsOnline::kOnlineRelayTokenSize> token{};
+		token[0] = 0x42;
+		std::string error;
+		Expect(GeneralsOnline::ConfigureOnlineRelaySession(
+			"relay.example.org", 29901, UINT64_C(42), 0, token, &error), error.c_str());
+		Expect(GeneralsOnline::SetOnlineVirtualIPv4(
+			0, GeneralsOnline::OnlineIPv4HostToNetwork(GeneralsOnline::OnlineVirtualIPv4HostOrder(0)), &error),
+			error.c_str());
+		Expect(GeneralsOnline::SetOnlineSessionReady(true, &error), error.c_str());
+	};
+
+	int clearCount = 0;
+	int leaveCount = 0;
+	configureRelaySession();
+	GeneralsOnline::ApplyOnlineStagingRoomExit(
+		false,
+		[&]() {
+			++clearCount;
+			GeneralsOnline::ClearOnlineSession();
+		},
+		[&]() { ++leaveCount; });
+	Expect(clearCount == 1 && leaveCount == 1,
+		"pre-launch staging exit did not clear the relay and send game.leave");
+	Expect(!GeneralsOnline::GetOnlineSessionSnapshot().ready,
+		"pre-launch staging exit retained the relay session");
+
+	clearCount = 0;
+	leaveCount = 0;
+	configureRelaySession();
+	GeneralsOnline::ApplyOnlineStagingRoomExit(
+		true,
+		[&]() {
+			++clearCount;
+			GeneralsOnline::ClearOnlineSession();
+		},
+		[&]() { ++leaveCount; });
+	const GeneralsOnline::OnlineSessionSnapshot retained = GeneralsOnline::GetOnlineSessionSnapshot();
+	Expect(clearCount == 0 && leaveCount == 0,
+		"post-launch staging teardown cleared the relay or sent game.leave");
+	Expect(retained.ready && retained.gameId == UINT64_C(42) && retained.token[0] == 0x42 &&
+		retained.virtualIPv4ByServiceSlot[0] != 0,
+		"post-launch staging teardown did not retain the authenticated relay session");
+	GeneralsOnline::ClearOnlineSession();
+}
+
+// GeneralsX @test OpenAI 02/08/2026 Suppress only Loading-to-Online teardown and preserve accepted status history.
+void TestBuddyLoadingStatusLifecycle()
+{
+	using GeneralsOnline::OnlineBuddyStatusKind;
+	GeneralsOnline::OnlineBuddyStatusPolicy policy;
+	int appliedStatuses = 0;
+	int endRequests = 0;
+	Expect(policy.apply(OnlineBuddyStatusKind::Playing, "Loading", [&]() { ++appliedStatuses; }),
+		"Loading presence was not accepted");
+	Expect(!policy.apply(OnlineBuddyStatusKind::Online, "Online", [&]() {
+		++appliedStatuses;
+		++endRequests;
+	}), "Loading-to-Online staging teardown was not suppressed");
+	Expect(appliedStatuses == 1 && endRequests == 0,
+		"suppressed Loading-to-Online transition still applied status or game.end side effects");
+	Expect(policy.lastStatus() == OnlineBuddyStatusKind::Playing && policy.lastStatusString() == "Loading",
+		"suppressed Loading-to-Online transition changed the prior accepted state");
+	Expect(!policy.apply(OnlineBuddyStatusKind::Online, "", [&]() {
+		++appliedStatuses;
+		++endRequests;
+	}), "Loading-to-Online suppression incorrectly depended on the incoming status text");
+	Expect(appliedStatuses == 1 && endRequests == 0 && policy.lastStatusString() == "Loading",
+		"a text variant of the suppressed Online transition applied side effects or changed history");
+
+	Expect(policy.apply(OnlineBuddyStatusKind::Playing, "Playing", [&]() { ++appliedStatuses; }),
+		"Playing presence was not accepted after loading");
+	Expect(policy.apply(OnlineBuddyStatusKind::Online, "Online", [&]() {
+		++appliedStatuses;
+		++endRequests;
+	}), "normal Playing-to-Online completion was suppressed");
+	Expect(appliedStatuses == 3 && endRequests == 1,
+		"normal Playing-to-Online completion did not apply game-end side effects exactly once");
+	Expect(policy.lastStatus() == OnlineBuddyStatusKind::Online && policy.lastStatusString() == "Online",
+		"normal Playing-to-Online completion did not update the accepted state");
+}
+
 void TestGameCompatibility()
 {
-	const GeneralsOnline::OnlineGameCompatibility local{"zerohour", 1, UINT32_C(0x12345678)};
-	const GeneralsOnline::OnlineGameCompatibility same{"zerohour", 1, UINT32_C(0x12345678)};
+#if !defined(USE_DETERMINISTIC_MATH)
+#error "Online endpoint tests for compatibility generation two require deterministic math"
+#endif
+	static_assert(GeneralsOnline::kOnlineCompatibilityVersion == 2,
+		"cross-platform deterministic clients require compatibility generation two");
+	const GeneralsOnline::OnlineGameCompatibility local{
+		"zerohour", GeneralsOnline::kOnlineCompatibilityVersion, UINT32_C(0x12345678)};
+	const GeneralsOnline::OnlineGameCompatibility same{
+		"zerohour", GeneralsOnline::kOnlineCompatibilityVersion, UINT32_C(0x12345678)};
 	Expect(GeneralsOnline::IsOnlineGameCompatible(local, same),
-		"an exact Online compatibility tuple was rejected");
+		"an exact generation-two Online compatibility tuple was rejected");
 	Expect(GeneralsOnline::ProjectOnlineExeCRC(UINT32_C(0x13579bdf), local, same) == UINT32_C(0x13579bdf),
 		"an exact compatibility tuple did not retain the local EXE CRC");
 
@@ -335,10 +427,10 @@ void TestGameCompatibility()
 		"a cross-product Online game was accepted");
 	Expect(GeneralsOnline::ProjectOnlineExeCRC(UINT32_C(0x13579bdf), local, mismatch) == UINT32_C(0xeca86420),
 		"a cross-product game did not enter the retail EXE-CRC rejection path");
-	mismatch = same;
-	mismatch.version = 2;
-	Expect(!GeneralsOnline::IsOnlineGameCompatible(local, mismatch),
-		"a different Online protocol generation was accepted");
+	const GeneralsOnline::OnlineGameCompatibility generationOne{
+		"zerohour", 1, UINT32_C(0x12345678)};
+	Expect(!GeneralsOnline::IsOnlineGameCompatible(local, generationOne),
+		"a generation-one Online client was accepted by generation two");
 	mismatch = same;
 	mismatch.iniCRC ^= UINT32_C(1);
 	Expect(!GeneralsOnline::IsOnlineGameCompatible(local, mismatch),
@@ -376,7 +468,8 @@ void TestGameBrowserDiff()
 	Expect(updateAndRemove.size() == 2U,
 		"browser diff did not retain independent update and remove deltas");
 	changed = games;
-	changed[0].compatibility = {"zerohour", 1, UINT32_C(0x12345678)};
+	changed[0].compatibility = {
+		"zerohour", GeneralsOnline::kOnlineCompatibilityVersion, UINT32_C(0x12345678)};
 	const auto compatibilityUpdate = GeneralsOnline::DiffOnlineGameBrowserSummaries(games, changed);
 	Expect(compatibilityUpdate.size() == 1U &&
 		compatibilityUpdate.front().type == GeneralsOnline::OnlineGameBrowserChangeType::Update,
@@ -739,6 +832,8 @@ int main()
 	TestAuthenticationSelection();
 	TestConnectionLossPolicy();
 	TestGameEndDisposition();
+	TestStagingRoomExitLifecycle();
+	TestBuddyLoadingStatusLifecycle();
 	TestGameCompatibility();
 	TestGameBrowserDiff();
 	TestGameMemberInfoDiff();

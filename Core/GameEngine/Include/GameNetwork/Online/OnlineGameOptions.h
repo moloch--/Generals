@@ -18,6 +18,13 @@
 namespace GeneralsOnline
 {
 
+// GeneralsX @bugfix OpenAI 02/08/2026 Never advertise the synchronized generation from an opt-out build.
+#if defined(USE_DETERMINISTIC_MATH)
+inline constexpr int kOnlineCompatibilityVersion = 2;
+#else
+inline constexpr int kOnlineCompatibilityVersion = 1;
+#endif
+
 // GeneralsX @feature Codex 01/08/2026 Fingerprint material game options without treating ready-state echoes as changes.
 std::string BuildOnlineReadyKey(const std::string &gameOptions);
 

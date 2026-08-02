@@ -1303,4 +1303,24 @@ if(RTS_BUILD_ONLINE_TESTS AND NOT IS_VS6_BUILD)
         target_link_libraries(generalsx_online_endpoint_tests PRIVATE ws2_32)
     endif()
     add_test(NAME generalsx_online_endpoint_tests COMMAND generalsx_online_endpoint_tests)
+
+    # GeneralsX @test OpenAI 02/08/2026 Pin WWMath's deterministic GameMath dispatch to cross-platform bit patterns.
+    if(SAGE_USE_DETERMINISTIC_MATH)
+        add_executable(generalsx_wwmath_determinism_tests
+            Tests/GameNetwork/Online/WWMathDeterminismTest.cpp
+        )
+        target_compile_definitions(generalsx_wwmath_determinism_tests PRIVATE
+            DISABLE_GAMEMEMORY=1
+        )
+        target_compile_features(generalsx_wwmath_determinism_tests PRIVATE cxx_std_20)
+        target_link_libraries(generalsx_wwmath_determinism_tests PRIVATE
+            gamemath
+            core_wwcommon
+            corei_always
+        )
+        add_test(
+            NAME generalsx_wwmath_determinism_tests
+            COMMAND generalsx_wwmath_determinism_tests
+        )
+    endif()
 endif()

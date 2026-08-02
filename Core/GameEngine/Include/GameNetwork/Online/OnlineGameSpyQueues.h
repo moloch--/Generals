@@ -10,6 +10,8 @@
 
 #pragma once
 
+#include <string>
+
 class GameSpyBuddyMessageQueueInterface;
 class GameSpyPeerMessageQueueInterface;
 class GameSpyPSMessageQueueInterface;
@@ -21,6 +23,57 @@ namespace GeneralsOnline
 constexpr bool ShouldReportOnlineConnectionLoss(bool expectedClose, bool authenticated, bool authenticating)
 {
 	return !expectedClose && (authenticated || authenticating);
+}
+
+enum class OnlineBuddyStatusKind
+{
+	Other,
+	Online,
+	Playing,
+};
+
+// GeneralsX @bugfix OpenAI 02/08/2026 Preserve the retail Loading presence across normal post-launch staging teardown.
+class OnlineBuddyStatusPolicy
+{
+public:
+	template<typename ApplyStatus>
+	bool apply(OnlineBuddyStatusKind status, const char *statusString, ApplyStatus applyStatus)
+	{
+		const std::string incomingStatusString = statusString != nullptr ? statusString : "";
+		if (m_lastStatus == OnlineBuddyStatusKind::Playing && m_lastStatusString == "Loading" &&
+			status == OnlineBuddyStatusKind::Online)
+		{
+			return false;
+		}
+
+		m_lastStatus = status;
+		m_lastStatusString = incomingStatusString;
+		applyStatus();
+		return true;
+	}
+
+	void reset()
+	{
+		m_lastStatus = OnlineBuddyStatusKind::Other;
+		m_lastStatusString.clear();
+	}
+
+	OnlineBuddyStatusKind lastStatus() const { return m_lastStatus; }
+	const std::string &lastStatusString() const { return m_lastStatusString; }
+
+private:
+	OnlineBuddyStatusKind m_lastStatus = OnlineBuddyStatusKind::Other;
+	std::string m_lastStatusString;
+};
+
+// GeneralsX @bugfix OpenAI 02/08/2026 Keep the launched relay alive when the retail UI leaves its staging room.
+template<typename ClearGameState, typename SendLeave>
+void ApplyOnlineStagingRoomExit(bool gameStarted, ClearGameState clearGameState, SendLeave sendLeave)
+{
+	if (gameStarted)
+		return;
+	clearGameState();
+	sendLeave();
 }
 
 // GeneralsX @feature Codex 01/08/2026 Adapt the retail Online UI to the GeneralsX service protocol.
