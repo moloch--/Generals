@@ -17,6 +17,12 @@ class GameSpyPSMessageQueueInterface;
 namespace GeneralsOnline
 {
 
+// GeneralsX @bugfix Codex 01/08/2026 Keep idle pre-auth transport closes from surfacing as stale login failures.
+constexpr bool ShouldReportOnlineConnectionLoss(bool expectedClose, bool authenticated, bool authenticating)
+{
+	return !expectedClose && (authenticated || authenticating);
+}
+
 // GeneralsX @feature Codex 01/08/2026 Adapt the retail Online UI to the GeneralsX service protocol.
 GameSpyBuddyMessageQueueInterface *CreateOnlineBuddyMessageQueue();
 GameSpyPeerMessageQueueInterface *CreateOnlinePeerMessageQueue();

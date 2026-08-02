@@ -389,7 +389,6 @@ public:
 	void handle(const PeerRequest &request);
 	void handle(const PSRequest &request);
 
-	bool isRunning() const;
 	bool isConnected() const;
 	bool isConnecting() const;
 	GPProfile localProfile() const;
@@ -422,7 +421,8 @@ private:
 
 	void attachCommon();
 	void detachCommon();
-	bool startControlLocked(const OnlineEndpoint &endpoint);
+	bool startControl(const OnlineEndpoint &endpoint, std::string &error);
+	void handleAuthentication(const BuddyRequest &request);
 	void resetStateLocked();
 	void clearGameStateLocked();
 	bool sendRequestLocked(const std::string &type, const Json &data, Pending pending);
@@ -530,7 +530,7 @@ public:
 		if (m_attached.exchange(false))
 			Service().detach(this);
 	}
-	Bool isThreadRunning() override { return m_attached.load() && Service().isRunning(); }
+	Bool isThreadRunning() override { return m_attached.load(); }
 	Bool isConnected() override { return m_attached.load() && Service().isConnected(); }
 	Bool isConnecting() override { return m_attached.load() && Service().isConnecting(); }
 	void addRequest(const BuddyRequest &request) override { Service().handle(request); }
@@ -558,7 +558,7 @@ public:
 		if (m_attached.exchange(false))
 			Service().detach(this);
 	}
-	Bool isThreadRunning() override { return m_attached.load() && Service().isRunning(); }
+	Bool isThreadRunning() override { return m_attached.load(); }
 	Bool isConnected() override { return m_attached.load() && Service().isConnected(); }
 	Bool isConnecting() override { return m_attached.load() && Service().isConnecting(); }
 	void addRequest(const PeerRequest &request) override { Service().handle(request); }
@@ -586,7 +586,7 @@ public:
 		if (m_attached.exchange(false))
 			Service().detach(this);
 	}
-	Bool isThreadRunning() override { return m_attached.load() && Service().isRunning(); }
+	Bool isThreadRunning() override { return m_attached.load(); }
 	void addRequest(const PSRequest &request) override { Service().handle(request); }
 	Bool getRequest(PSRequest &) override { return false; }
 	void addResponse(const PSResponse &response) override { m_responses.push(response); }
@@ -623,14 +623,11 @@ private:
 void OnlineServiceSession::attachCommon()
 {
 	++m_attachmentCount;
-	if (m_attachmentCount != 1)
-		return;
-	startControlLocked(GetOnlineEndpoint());
 }
 
-bool OnlineServiceSession::startControlLocked(const OnlineEndpoint &endpoint)
+bool OnlineServiceSession::startControl(const OnlineEndpoint &endpoint, std::string &error)
 {
-	std::string error;
+	// GeneralsX @bugfix Codex 01/08/2026 Connect only when authentication begins so the login form has no idle deadline.
 	if (!endpoint.configured || !m_client.start(
 			endpoint.host,
 			endpoint.controlPort,
@@ -639,12 +636,10 @@ bool OnlineServiceSession::startControlLocked(const OnlineEndpoint &endpoint)
 			[this](bool connected, const std::string &detail) { onConnectionState(connected, detail); },
 			&error))
 	{
-		m_connectionFailed = true;
-		m_lastConnectionError = error.empty() ? "Online server is not configured" : error;
+		if (error.empty())
+			error = "Online server is not configured";
 		return false;
 	}
-	m_connectionFailed = false;
-	m_lastConnectionError.clear();
 	return true;
 }
 
@@ -780,11 +775,6 @@ void OnlineServiceSession::detach(OnlinePersistentStorageMessageQueue *queue)
 		if (m_attachmentCount == 0)
 			resetStateLocked();
 	}
-}
-
-bool OnlineServiceSession::isRunning() const
-{
-	return m_client.isRunning();
 }
 
 bool OnlineServiceSession::isConnected() const
@@ -1042,7 +1032,8 @@ void OnlineServiceSession::onConnectionState(bool connected, const std::string &
 	m_expectedClose = false;
 	m_connectionFailed = true;
 	m_lastConnectionError = detail;
-	const bool wasActive = m_authenticated || m_authenticating;
+	const bool reportConnectionLoss =
+		ShouldReportOnlineConnectionLoss(expectedClose, m_authenticated, m_authenticating);
 	m_authenticated = false;
 	m_authenticating = false;
 	m_gameListActive = false;
@@ -1050,7 +1041,7 @@ void OnlineServiceSession::onConnectionState(bool connected, const std::string &
 	m_client.setHeartbeatEnabled(false);
 	m_pending.clear();
 	clearGameStateLocked();
-	if (!expectedClose && (wasActive || m_peer))
+	if (reportConnectionLoss)
 		emitDisconnectLocked(DISCONNECT_LOSTCON, detail);
 }
 
@@ -1902,62 +1893,92 @@ void OnlineServiceSession::sendUTMLocked(const PeerRequest &request)
 		sendRequestLocked("game.chat", Json{{"message", encoded}, {"action", false}});
 }
 
+void OnlineServiceSession::handleAuthentication(const BuddyRequest &request)
+{
+	const bool createAccount = request.buddyRequestType == BuddyRequest::BUDDYREQUEST_LOGINNEW;
+	const OnlineEndpoint endpoint = GetOnlineEndpoint();
+	if (!m_client.isRunning())
+	{
+		std::string error;
+		// Joining a finished worker while holding m_mutex can deadlock its state callback.
+		if (!startControl(endpoint, error))
+		{
+			OnlineLock lock(m_mutex);
+			m_connectionFailed = true;
+			m_lastConnectionError = error;
+			m_authenticating = false;
+			emitDisconnectLocked(DISCONNECT_COULDNOTCONNECT, m_lastConnectionError);
+			return;
+		}
+	}
+
+	OnlineLock lock(m_mutex);
+	m_gameListActive = false;
+	m_publicGames.clear();
+	if (!m_client.isRunning())
+	{
+		m_authenticating = false;
+		m_connectionFailed = true;
+		if (m_lastConnectionError.empty())
+			m_lastConnectionError = "Online control connection ended before authentication";
+		emitDisconnectLocked(DISCONNECT_COULDNOTCONNECT, m_lastConnectionError);
+		return;
+	}
+	m_connectionFailed = false;
+	m_lastConnectionError.clear();
+	if (request.buddyRequestType != BuddyRequest::BUDDYREQUEST_RELOGIN)
+	{
+		m_authName = request.arg.login.nick;
+		m_authUsername = request.arg.login.nick;
+		if (endpoint.useTLS)
+			m_authPassword = Truncate(request.arg.login.password, 128);
+		else
+			m_authPassword.clear();
+	}
+	m_authenticating = true;
+	m_expectedClose = false;
+	bool sent = false;
+	// GeneralsX @feature Codex 01/08/2026 Permit persistent credentials only when the configured control channel is TLS.
+	switch (SelectOnlineAuthentication(endpoint.useTLS, createAccount))
+	{
+		case OnlineAuthenticationKind::Guest:
+			sent = sendRequestLocked(
+				"auth.guest", Json{{"display_name", m_authName}}, {Operation::Authenticate, 0, createAccount});
+			break;
+		case OnlineAuthenticationKind::Login:
+			sent = sendRequestLocked("auth.login", Json{
+				{"username", m_authUsername}, {"password", m_authPassword},
+			}, {Operation::Authenticate, 0, false});
+			break;
+		case OnlineAuthenticationKind::Register:
+			sent = sendRequestLocked("auth.register", Json{
+				{"username", m_authUsername}, {"password", m_authPassword}, {"display_name", m_authName},
+			}, {Operation::Authenticate, 0, true});
+			break;
+	}
+	if (!sent)
+	{
+		m_authenticating = false;
+		emitDisconnectLocked(DISCONNECT_COULDNOTCONNECT, m_lastConnectionError);
+	}
+}
+
 void OnlineServiceSession::handle(const BuddyRequest &request)
 {
-	OnlineLock lock(m_mutex);
 	switch (request.buddyRequestType)
 	{
 		case BuddyRequest::BUDDYREQUEST_LOGIN:
 		case BuddyRequest::BUDDYREQUEST_RELOGIN:
 		case BuddyRequest::BUDDYREQUEST_LOGINNEW:
-		{
-			m_gameListActive = false;
-			m_publicGames.clear();
-			const bool createAccount = request.buddyRequestType == BuddyRequest::BUDDYREQUEST_LOGINNEW;
-			const OnlineEndpoint endpoint = GetOnlineEndpoint();
-			if (!m_client.isRunning() && !startControlLocked(endpoint))
-			{
-				m_authenticating = false;
-				emitDisconnectLocked(DISCONNECT_COULDNOTCONNECT, m_lastConnectionError);
-				break;
-			}
-			if (request.buddyRequestType != BuddyRequest::BUDDYREQUEST_RELOGIN)
-			{
-				m_authName = request.arg.login.nick;
-				m_authUsername = request.arg.login.nick;
-				if (endpoint.useTLS)
-					m_authPassword = Truncate(request.arg.login.password, 128);
-				else
-					m_authPassword.clear();
-			}
-			m_authenticating = true;
-			m_expectedClose = false;
-			bool sent = false;
-			// GeneralsX @feature Codex 01/08/2026 Permit persistent credentials only when the configured control channel is TLS.
-			switch (SelectOnlineAuthentication(endpoint.useTLS, createAccount))
-			{
-				case OnlineAuthenticationKind::Guest:
-					sent = sendRequestLocked(
-						"auth.guest", Json{{"display_name", m_authName}}, {Operation::Authenticate, 0, createAccount});
-					break;
-				case OnlineAuthenticationKind::Login:
-					sent = sendRequestLocked("auth.login", Json{
-						{"username", m_authUsername}, {"password", m_authPassword},
-					}, {Operation::Authenticate, 0, false});
-					break;
-				case OnlineAuthenticationKind::Register:
-					sent = sendRequestLocked("auth.register", Json{
-						{"username", m_authUsername}, {"password", m_authPassword}, {"display_name", m_authName},
-					}, {Operation::Authenticate, 0, true});
-					break;
-			}
-			if (!sent)
-			{
-				m_authenticating = false;
-				emitDisconnectLocked(DISCONNECT_COULDNOTCONNECT, m_lastConnectionError);
-			}
+			handleAuthentication(request);
+			return;
+		default:
 			break;
-		}
+	}
+
+	OnlineLock lock(m_mutex);
+	switch (request.buddyRequestType)
+	{
 		case BuddyRequest::BUDDYREQUEST_LOGOUT:
 			clearGameStateLocked();
 			m_gameListActive = false;

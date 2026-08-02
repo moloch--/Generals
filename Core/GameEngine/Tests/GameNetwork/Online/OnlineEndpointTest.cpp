@@ -11,6 +11,7 @@
 #include "GameNetwork/Online/OnlineEndpoint.h"
 #include "GameNetwork/Online/OnlineControlClient.h"
 #include "GameNetwork/Online/OnlineGameOptions.h"
+#include "GameNetwork/Online/OnlineGameSpyQueues.h"
 #include "GameNetwork/Online/OnlineSessionState.h"
 
 #include <array>
@@ -261,6 +262,19 @@ void TestAuthenticationSelection()
 		"TLS account creation did not select registration");
 }
 
+// GeneralsX @test Codex 01/08/2026 Ignore only idle pre-auth closes while preserving real login and session failures.
+void TestConnectionLossPolicy()
+{
+	Expect(!GeneralsOnline::ShouldReportOnlineConnectionLoss(false, false, false),
+		"idle pre-auth control close surfaced as a stale login failure");
+	Expect(GeneralsOnline::ShouldReportOnlineConnectionLoss(false, false, true),
+		"an authentication-time connection loss was hidden");
+	Expect(GeneralsOnline::ShouldReportOnlineConnectionLoss(false, true, false),
+		"an authenticated session connection loss was hidden");
+	Expect(!GeneralsOnline::ShouldReportOnlineConnectionLoss(true, true, false),
+		"an expected Online close surfaced as a connection loss");
+}
+
 void TestGameEndDisposition()
 {
 	Expect(!GeneralsOnline::ShouldDisconnectForOnlineGameEnd(false, "host_left"),
@@ -480,6 +494,83 @@ void TestControlClientFraming()
 		"control client did not strip CRLF framing");
 }
 
+// GeneralsX @test Codex 01/08/2026 Reuse the native control client after a server closes an earlier connection.
+void TestControlClientRestartAfterClose()
+{
+	TestSocketRuntime socketRuntime;
+	Expect(socketRuntime.started(), "could not initialize restart test sockets");
+	const TestSocket listener = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+	Expect(listener != kInvalidTestSocket, "could not create restart test listener");
+	sockaddr_in address{};
+	address.sin_family = AF_INET;
+	address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+	address.sin_port = 0;
+	Expect(bind(listener, reinterpret_cast<const sockaddr *>(&address), sizeof(address)) == 0,
+		"could not bind restart test listener");
+	Expect(listen(listener, 2) == 0, "could not listen for restarted control client");
+	TestSocketLength addressSize = sizeof(address);
+	Expect(getsockname(listener, reinterpret_cast<sockaddr *>(&address), &addressSize) == 0,
+		"could not read restart test port");
+
+	const std::string authentication = "{\"v\":1,\"type\":\"auth.login\",\"id\":\"1\",\"data\":{}}\n";
+	std::string receivedAfterRestart;
+	std::thread server([&]() {
+		const TestSocket firstConnection = accept(listener, nullptr, nullptr);
+		CloseTestSocket(firstConnection);
+		const TestSocket restartedConnection = accept(listener, nullptr, nullptr);
+		if (restartedConnection == kInvalidTestSocket)
+			return;
+		char bytes[1024];
+		while (receivedAfterRestart.find('\n') == std::string::npos)
+		{
+			const int count = recv(restartedConnection, bytes, sizeof(bytes), 0);
+			if (count <= 0)
+				break;
+			receivedAfterRestart.append(bytes, static_cast<std::size_t>(count));
+		}
+		CloseTestSocket(restartedConnection);
+	});
+
+	std::mutex callbackMutex;
+	std::condition_variable callbackReady;
+	int connections = 0;
+	int disconnections = 0;
+	GeneralsOnline::OnlineControlClient client;
+	std::string error;
+	auto stateHandler = [&](bool connected, const std::string &) {
+		std::lock_guard<std::mutex> lock(callbackMutex);
+		if (connected)
+			++connections;
+		else
+			++disconnections;
+		callbackReady.notify_one();
+	};
+	Expect(client.start(
+		"127.0.0.1", ntohs(address.sin_port), false,
+		[](const std::string &) {}, stateHandler, &error), error.c_str());
+	{
+		std::unique_lock<std::mutex> lock(callbackMutex);
+		Expect(callbackReady.wait_for(lock, std::chrono::seconds(3), [&]() { return disconnections == 1; }),
+			"first control close was not observed");
+	}
+	Expect(!client.isRunning(), "control client remained running after the first close");
+	Expect(client.start(
+		"127.0.0.1", ntohs(address.sin_port), false,
+		[](const std::string &) {}, stateHandler, &error), error.c_str());
+	Expect(client.sendLine(authentication.substr(0, authentication.size() - 1U), &error), error.c_str());
+	{
+		std::unique_lock<std::mutex> lock(callbackMutex);
+		Expect(callbackReady.wait_for(lock, std::chrono::seconds(3), [&]() { return disconnections == 2; }),
+			"restarted control client did not complete the authentication frame");
+	}
+	client.stop();
+	server.join();
+	CloseTestSocket(listener);
+	Expect(connections == 2, "control client did not establish both native connections");
+	Expect(receivedAfterRestart == authentication,
+		"restarted control client did not send the exact queued authentication request");
+}
+
 #ifdef SAGE_ONLINE_TLS
 // GeneralsX @feature Codex 01/08/2026 Exercise the real libcurl TLS path and prove it never leaks queued JSON via plaintext fallback.
 void TestTLSNeverFallsBackToPlaintext()
@@ -564,6 +655,7 @@ int main()
 	TestSessionState();
 	TestReadyKey();
 	TestAuthenticationSelection();
+	TestConnectionLossPolicy();
 	TestGameEndDisposition();
 	TestGameCompatibility();
 	TestGameBrowserDiff();
@@ -572,6 +664,7 @@ int main()
 	TestLegacyResultsParser();
 #if !defined(_WIN32) || defined(_MSC_VER)
 	TestControlClientFraming();
+	TestControlClientRestartAfterClose();
 #ifdef SAGE_ONLINE_TLS
 	TestTLSNeverFallsBackToPlaintext();
 #endif
