@@ -551,6 +551,11 @@ void TestTLSNeverFallsBackToPlaintext()
 
 } // namespace
 
+#ifdef GENERALSX_RUN_ONLINE_RELAY_TESTS
+// GeneralsX @test Codex 01/08/2026 Exercise the production Online relay transport against loopback UDP.
+void RunOnlineRelayTransportTests();
+#endif
+
 // GeneralsX @feature Codex 01/08/2026 Cover Online endpoint validation and synchronized relay session publication.
 int main()
 {
@@ -570,6 +575,9 @@ int main()
 #ifdef SAGE_ONLINE_TLS
 	TestTLSNeverFallsBackToPlaintext();
 #endif
+#endif
+#ifdef GENERALSX_RUN_ONLINE_RELAY_TESTS
+	RunOnlineRelayTransportTests();
 #endif
 	return 0;
 }

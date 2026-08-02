@@ -1248,7 +1248,7 @@ if(SAGE_UPDATE_CHECK OR SAGE_ONLINE_TLS)
     target_link_libraries(corei_gameengine_public INTERFACE CURL::libcurl)
 endif()
 
-# GeneralsX @build Codex 01/08/2026 Compile the pure Online configuration tests without the full game runtime.
+# GeneralsX @build Codex 01/08/2026 Compile focused Online protocol tests without the full game runtime.
 if(RTS_BUILD_ONLINE_TESTS AND NOT IS_VS6_BUILD)
     add_executable(generalsx_online_endpoint_tests
         Tests/GameNetwork/Online/OnlineEndpointTest.cpp
@@ -1263,6 +1263,30 @@ if(RTS_BUILD_ONLINE_TESTS AND NOT IS_VS6_BUILD)
         ${CMAKE_SOURCE_DIR}/Core/Libraries/Include
         ${CMAKE_SOURCE_DIR}/Dependencies/Utility
     )
+    # GeneralsX @test Codex 01/08/2026 Run the native relay fixture on POSIX and MSVC.
+    # MinGW's win32 thread model remains compile-covered by the full game targets.
+    if(NOT MINGW)
+        target_sources(generalsx_online_endpoint_tests PRIVATE
+            Tests/GameNetwork/Online/OnlineRelayTransportTest.cpp
+            ${GENERALSX_ONLINE_PLATFORM_SOURCE_DIR}/OnlineRelayTransport.cpp
+            Source/GameNetwork/Transport.cpp
+            Source/GameNetwork/udp.cpp
+        )
+        target_include_directories(generalsx_online_endpoint_tests PRIVATE
+            ${CMAKE_SOURCE_DIR}/GeneralsMD/Code/GameEngine/Include
+            ${CMAKE_SOURCE_DIR}/GeneralsMD/Code/GameEngine/Include/Precompiled
+        )
+        target_compile_definitions(generalsx_online_endpoint_tests PRIVATE
+            DISABLE_GAMEMEMORY=1
+            GENERALSX_RUN_ONLINE_RELAY_TESTS
+        )
+        target_link_libraries(generalsx_online_endpoint_tests PRIVATE
+            core_config
+            corei_libraries_source_wwvegas
+            core_utility
+            d3d8lib
+        )
+    endif()
     # GeneralsX @test Codex 01/08/2026 Exercise the non-empty built-in endpoint path without embedding a deployment address in source.
     target_compile_definitions(generalsx_online_endpoint_tests PRIVATE
         SAGE_ONLINE_SERVER_DEFAULT="192.0.2.10:30000"
