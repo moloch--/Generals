@@ -608,6 +608,8 @@ private:
 			requireOption(curl_easy_setopt(curl, CURLOPT_ERRORBUFFER, curlError), "error reporting") &&
 			requireOption(curl_easy_setopt(curl, CURLOPT_URL, url.c_str()), "server URL") &&
 			requireOption(curl_easy_setopt(curl, CURLOPT_CONNECT_ONLY, 1L), "connect-only transport") &&
+			// GeneralsX @bugfix Codex 02/08/2026 Avoid curl 8.13 Schannel's TLS 1.3 ticket failure on non-reusable connections.
+			requireOption(curl_easy_setopt(curl, CURLOPT_SSL_SESSIONID_CACHE, 0L), "connect-only session cache") &&
 			requireOption(curl_easy_setopt(curl, CURLOPT_HTTP_VERSION, CURL_HTTP_VERSION_1_1), "HTTP/1.1 ALPN") &&
 			requireOption(curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT_MS,
 				static_cast<long>(std::chrono::duration_cast<std::chrono::milliseconds>(kConnectTimeout).count())),

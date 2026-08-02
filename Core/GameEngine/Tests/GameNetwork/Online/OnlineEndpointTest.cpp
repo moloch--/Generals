@@ -605,6 +605,54 @@ void TestControlClientRestartAfterClose()
 }
 
 #ifdef SAGE_ONLINE_TLS
+// GeneralsX @test Codex 02/08/2026 Exercise the real TLS control client when an explicit test endpoint is supplied.
+void TestTLSControlClientAgainstConfiguredEndpoint()
+{
+	const char *configuredEndpoint = std::getenv("GENERALSX_ONLINE_TLS_TEST_ENDPOINT");
+	if (configuredEndpoint == nullptr || configuredEndpoint[0] == '\0')
+		return;
+
+	GeneralsOnline::OnlineEndpoint endpoint;
+	std::string error;
+	Expect(GeneralsOnline::ParseOnlineEndpoint(configuredEndpoint, endpoint, &error), error.c_str());
+	Expect(endpoint.configured && endpoint.useTLS,
+		"live Online TLS test endpoint must use the tls:// scheme");
+
+	std::mutex callbackMutex;
+	std::condition_variable callbackReady;
+	std::string receivedLine;
+	std::string failureDetail;
+	GeneralsOnline::OnlineControlClient client;
+	Expect(client.start(
+		endpoint.host,
+		endpoint.controlPort,
+		true,
+		[&](const std::string &line) {
+			std::lock_guard<std::mutex> lock(callbackMutex);
+			if (receivedLine.empty())
+				receivedLine = line;
+			callbackReady.notify_one();
+		},
+		[&](bool connected, const std::string &detail) {
+			if (connected)
+				return;
+			std::lock_guard<std::mutex> lock(callbackMutex);
+			failureDetail = detail;
+			callbackReady.notify_one();
+		},
+		&error), error.c_str());
+	{
+		std::unique_lock<std::mutex> lock(callbackMutex);
+		Expect(callbackReady.wait_for(lock, std::chrono::seconds(8), [&]() {
+			return !receivedLine.empty() || !failureDetail.empty();
+		}), "live Online TLS endpoint did not answer");
+	}
+	client.stop();
+	Expect(failureDetail.empty(), failureDetail.c_str());
+	Expect(receivedLine.find("\"type\":\"server.hello\"") != std::string::npos,
+		"live Online TLS endpoint did not send server.hello first");
+}
+
 // GeneralsX @feature Codex 01/08/2026 Exercise the real libcurl TLS path and prove it never leaks queued JSON via plaintext fallback.
 void TestTLSNeverFallsBackToPlaintext()
 {
@@ -700,6 +748,7 @@ int main()
 	TestControlClientFraming();
 	TestControlClientRestartAfterClose();
 #ifdef SAGE_ONLINE_TLS
+	TestTLSControlClientAgainstConfiguredEndpoint();
 	TestTLSNeverFallsBackToPlaintext();
 #endif
 #endif

@@ -3,18 +3,20 @@
 This Go module builds a native GeneralsX game, its runtime libraries, and a
 locally staged retail-data tree into one self-extracting executable.
 
-> **Current status (2026-08-01):** the packer, launcher, deterministic archive,
+> **Current status (2026-08-02):** the packer, launcher, deterministic archive,
 > extraction cache, safety checks, and platform staging paths are implemented.
 > The previously measured retail-sized macOS/ARM64 artifact passed
 > code-signature and full extraction verification, then reached the Zero Hour
 > main menu on both cold and warm-cache launches. The current macOS path
 > packages the launcher as a signed Finder-recognized `.app` with a complete
 > Retina icon and native first-launch progress window; the progress-enabled app
-> bundle has also passed signed fixture-based cold/warm launch validation. The
-> Linux/AMD64 artifact passed full
-> extraction and file-hash verification under an AMD64 Linux container; its
-> graphical runtime still needs a native Linux/Vulkan host. Windows wrapper cross-builds pass,
-> but the current Windows game runtime is not gameplay-ready.
+> bundle has also passed signed fixture-based cold/warm launch validation. A
+> standalone Windows launcher also presents cache-miss progress through native
+> in-process controls without requiring a helper executable. The Linux/AMD64
+> artifact passed full extraction and file-hash verification under an AMD64
+> Linux container; its graphical runtime still needs a native Linux/Vulkan
+> host. Windows wrapper cross-builds and the native MSVC x86 Online build/tests
+> pass; a full Windows/macOS retail match remains the outstanding gameplay gate.
 
 The SFX is native, not an emulator and not a universal binary. A
 `darwin/arm64` wrapper contains a macOS/ARM64 game, a `linux/amd64` wrapper
@@ -93,7 +95,8 @@ The module is divided into a few narrow components:
 - `internal/launch` prepares target-specific library paths, asset paths,
   writable runtime state, environment, arguments, and standard streams.
 - `internal/progress` sends throttled, best-effort extraction updates to the
-  separately packaged macOS AppKit helper without adding CGO to the launcher.
+  separately packaged macOS AppKit helper or the in-process Windows presenter
+  without adding CGO to the launcher.
 - `internal/payload` selects an empty development filesystem by default and
   the generated `go:embed` filesystem only under the `gxpacked` build tag.
 
@@ -325,14 +328,15 @@ On a cache miss, the launcher:
 4. writes the completion marker last;
 5. atomically renames the complete stage into its final cache path.
 
-When the launcher runs inside `GeneralsXZH.app`, the process that actually owns
-that cache-miss extraction also opens a native progress window. Package
-authentication and final cache validation use an animated indeterminate bar;
-regular-file extraction uses exact bytes written against the manifest's total.
-The helper is presentation-only and best-effort: a missing or failed helper
-does not change extraction, cache publication, or launch behavior. Raw SFX
-executables and non-macOS targets retain their console-only behavior, and warm
-app launches do not open the extraction window.
+The process that actually owns a cache-miss extraction opens a native progress
+window when launched from `GeneralsXZH.app` on macOS or from the standalone
+`.exe` on Windows. Package authentication and final cache validation use an
+animated indeterminate bar; regular-file extraction uses exact bytes written
+against the manifest's total. Presentation is best-effort: a missing macOS
+helper, unavailable Windows desktop, or failed native control does not change
+extraction, cache publication, or launch behavior. Raw macOS SFX executables
+and Linux targets retain their console-only behavior, and warm launches do not
+open the extraction window.
 
 Concurrent first launches wait for the same content entry instead of exposing
 a partially extracted tree. Later launches take a shared lease, validate the
@@ -572,12 +576,13 @@ codesign -dv --verbose=4 "${app}"
 "${app}/Contents/Helpers/GeneralsX-SFX-Progress" --self-test
 ```
 
-## XZ third-party notice
+## Launcher third-party notices
 
 The launcher embeds `github.com/ulikunitz/xz` for XZ decoding and as the
-pure-Go compression fallback. It is distributed under a BSD-style license.
-The required notice is embedded in every packed launcher and is available
-through:
+pure-Go compression fallback. Windows launchers also use
+`golang.org/x/sys/windows` to load native UI dependencies exclusively from the
+system directory. Both modules use BSD-style licenses. Their required notices
+are embedded in every packed launcher and are available through:
 
 ```bash
 "${artifact}" --sfx-notices
