@@ -1159,6 +1159,7 @@ if(NOT IS_VS6_BUILD)
         Include/GameNetwork/Online/OnlineEndpoint.h
         Include/GameNetwork/Online/OnlineGameOptions.h
         Include/GameNetwork/Online/OnlineGameSpyQueues.h
+        Include/GameNetwork/Online/OnlineLoginPassword.h
         Include/GameNetwork/Online/OnlineRelayTransport.h
         Include/GameNetwork/Online/OnlineSessionState.h
         ${GENERALSX_ONLINE_PLATFORM_SOURCE_DIR}/OnlineControlClient.cpp

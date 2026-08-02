@@ -64,6 +64,7 @@
 #include "GameNetwork/GameSpy/BuddyThread.h"
 #include "GameNetwork/GameSpy/ThreadUtils.h"
 #include "GameNetwork/GameSpy/PersistentStorageThread.h"
+#include "GameNetwork/Online/OnlineLoginPassword.h"
 
 #include "GameNetwork/GameSpyOverlay.h"
 
@@ -115,18 +116,7 @@ static AsciiString obfuscate( AsciiString in )
 {
 	char *buf = NEW char[in.getLength() + 1];
 	strcpy(buf, in.str());
-	static const char *xorWord = "1337Munkee";
-	char *c = buf;
-	const char *c2 = xorWord;
-	while (*c)
-	{
-		if (!*c2)
-			c2 = xorWord;
-		if (*c != *c2)
-			*c = *c++ ^ *c2++;
-		else
-			c++, c2++;
-	}
+	GeneralsOnline::ObfuscateLoginPassword(buf);
 	AsciiString out = buf;
 	delete[] buf;
 	return out;

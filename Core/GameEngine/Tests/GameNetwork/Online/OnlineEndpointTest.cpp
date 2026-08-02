@@ -12,6 +12,7 @@
 #include "GameNetwork/Online/OnlineControlClient.h"
 #include "GameNetwork/Online/OnlineGameOptions.h"
 #include "GameNetwork/Online/OnlineGameSpyQueues.h"
+#include "GameNetwork/Online/OnlineLoginPassword.h"
 #include "GameNetwork/Online/OnlineSessionState.h"
 
 #include <array>
@@ -92,6 +93,38 @@ void Expect(bool condition, const char *message)
 		std::cerr << "FAIL: " << message << '\n';
 		std::exit(1);
 	}
+}
+
+// GeneralsX @test Codex 01/08/2026 Preserve legacy cached-password bytes while preventing
+// pointer sequencing regressions.
+void TestLoginPasswordObfuscation()
+{
+	char password[] = "WinE2E-fffe-2026";
+	const unsigned char expected[] = {
+		0x66, 0x5a, 0x5d, 0x72, 0x7f, 0x30, 0x43, 0x0d,
+		0x03, 0x03, 0x54, 0x1e, 0x01, 0x07, 0x7f, 0x43,
+	};
+	GeneralsOnline::ObfuscateLoginPassword(password);
+	for (std::size_t i = 0; i < sizeof(expected); ++i)
+	{
+		Expect(static_cast<unsigned char>(password[i]) == expected[i],
+			"cached password bytes changed");
+	}
+	Expect(password[sizeof(expected)] == '\0', "cached password transform overwrote its terminator");
+
+	GeneralsOnline::ObfuscateLoginPassword(password);
+	Expect(std::strcmp(password, "WinE2E-fffe-2026") == 0,
+		"cached password transform did not round-trip across a wrapped key");
+
+	char equalBytes[] = "1337Munkee";
+	GeneralsOnline::ObfuscateLoginPassword(equalBytes);
+	Expect(std::strcmp(equalBytes, "1337Munkee") == 0,
+		"cached password transform introduced a null for equal bytes");
+
+	char sentinel[] = {'A', '\0', 'S', '\0'};
+	GeneralsOnline::ObfuscateLoginPassword(sentinel);
+	Expect(sentinel[1] == '\0' && sentinel[2] == 'S',
+		"cached password transform wrote beyond the terminator");
 }
 
 // GeneralsX @test Codex 01/08/2026 Verify the built-in default lifecycle and command-line-style override precedence.
@@ -650,6 +683,7 @@ void RunOnlineRelayTransportTests();
 // GeneralsX @feature Codex 01/08/2026 Cover Online endpoint validation and synchronized relay session publication.
 int main()
 {
+	TestLoginPasswordObfuscation();
 	TestBuiltInEndpointLifecycle();
 	TestEndpointParser();
 	TestSessionState();
