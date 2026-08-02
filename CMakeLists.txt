@@ -30,6 +30,13 @@ if (CMAKE_BINARY_DIR STREQUAL CMAKE_SOURCE_DIR)
     message(FATAL_ERROR "Building in-source is not supported! Create a build dir and remove ${CMAKE_SOURCE_DIR}/CMakeCache.txt")
 endif()
 
+# GeneralsX @build Codex 01/08/2026 Load optional machine-local build defaults without tracking deployment values.
+set(_generalsx_local_config "${CMAKE_SOURCE_DIR}/.generalsx-local.cmake")
+if(EXISTS "${_generalsx_local_config}")
+    include("${_generalsx_local_config}")
+endif()
+unset(_generalsx_local_config)
+
 # Top level project, doesn't really affect anything.
 project(genzh LANGUAGES C CXX)
 

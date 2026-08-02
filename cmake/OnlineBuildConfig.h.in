@@ -1,0 +1,16 @@
+/*
+** Command & Conquer Generals Zero Hour(tm)
+** Copyright 2025 Electronic Arts Inc.
+**
+** This program is free software: you can redistribute it and/or modify
+** it under the terms of the GNU General Public License as published by
+** the Free Software Foundation, either version 3 of the License, or
+** (at your option) any later version.
+*/
+
+#pragma once
+
+// GeneralsX @build Codex 01/08/2026 Generate the deployment-specific Online endpoint outside the source tree.
+#ifndef SAGE_ONLINE_SERVER_DEFAULT
+#define SAGE_ONLINE_SERVER_DEFAULT "@GENERALSX_ONLINE_SERVER_DEFAULT@"
+#endif

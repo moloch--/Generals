@@ -9,8 +9,10 @@
 */
 
 #include "GameNetwork/Online/OnlineEndpoint.h"
+#include "GameNetwork/Online/OnlineBuildConfig.h"
 
 #include <cctype>
+#include <cstdio>
 #include <limits>
 #include <string_view>
 
@@ -19,8 +21,31 @@ namespace GeneralsOnline
 namespace
 {
 
-OnlineEndpoint s_onlineEndpoint;
 constexpr std::string_view kTLSPrefix = "tls://";
+constexpr char kBuiltInOnlineServerEndpoint[] = SAGE_ONLINE_SERVER_DEFAULT;
+
+OnlineEndpoint BuildBuiltInOnlineEndpoint()
+{
+	OnlineEndpoint endpoint;
+	if (kBuiltInOnlineServerEndpoint[0] == '\0')
+	{
+		return endpoint;
+	}
+
+	std::string error;
+	if (!ParseOnlineEndpoint(kBuiltInOnlineServerEndpoint, endpoint, &error))
+	{
+		std::fprintf(stderr, "ERROR: Built-in Online server endpoint is invalid: %s\n", error.c_str());
+		return OnlineEndpoint();
+	}
+	return endpoint;
+}
+
+OnlineEndpoint &MutableOnlineEndpoint()
+{
+	static OnlineEndpoint endpoint = BuildBuiltInOnlineEndpoint();
+	return endpoint;
+}
 
 void SetError(std::string *error, const char *message)
 {
@@ -229,18 +254,23 @@ bool ConfigureOnlineEndpoint(const char *value, std::string *error)
 		return false;
 	}
 
-	s_onlineEndpoint = parsed;
+	MutableOnlineEndpoint() = parsed;
 	return true;
 }
 
 const OnlineEndpoint &GetOnlineEndpoint()
 {
-	return s_onlineEndpoint;
+	return MutableOnlineEndpoint();
+}
+
+const char *GetBuiltInOnlineServerEndpoint()
+{
+	return kBuiltInOnlineServerEndpoint;
 }
 
 void ClearOnlineEndpoint()
 {
-	s_onlineEndpoint = OnlineEndpoint();
+	MutableOnlineEndpoint() = BuildBuiltInOnlineEndpoint();
 }
 
 } // namespace GeneralsOnline

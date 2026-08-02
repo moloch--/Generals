@@ -1259,8 +1259,13 @@ if(RTS_BUILD_ONLINE_TESTS AND NOT IS_VS6_BUILD)
     )
     target_include_directories(generalsx_online_endpoint_tests PRIVATE
         Include
+        ${GENERALSX_GENERATED_INCLUDE_DIR}
         ${CMAKE_SOURCE_DIR}/Core/Libraries/Include
         ${CMAKE_SOURCE_DIR}/Dependencies/Utility
+    )
+    # GeneralsX @test Codex 01/08/2026 Exercise the non-empty built-in endpoint path without embedding a deployment address in source.
+    target_compile_definitions(generalsx_online_endpoint_tests PRIVATE
+        SAGE_ONLINE_SERVER_DEFAULT="192.0.2.10:30000"
     )
     target_compile_features(generalsx_online_endpoint_tests PRIVATE cxx_std_20)
     find_package(Threads REQUIRED)

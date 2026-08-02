@@ -56,6 +56,32 @@ untrusted network. Chat and control metadata are visible in transit even
 when persistent credentials are not used, and gameplay relay packets are not
 encrypted by this service.
 
+## Build a default endpoint into local binaries
+
+Modern builds accept the CMake cache variable
+`SAGE_ONLINE_SERVER_DEFAULT=<[tls://]host[:port]>`. A non-empty value is parsed
+and embedded in the native game executable, so **MULTIPLAYER > ONLINE** uses it
+without a launcher argument. The committed default is empty, which preserves
+the legacy Online path for upstream and CI builds.
+
+For a persistent machine-local default, create the ignored file
+`.generalsx-local.cmake` at the repository root:
+
+```cmake
+set(SAGE_ONLINE_SERVER_DEFAULT "online.example.net:29900" CACHE STRING
+    "Default Online service endpoint compiled into modern clients")
+```
+
+Every normal preset and packaging script loads this file automatically. Do not
+commit it: deployment addresses belong only in local build configuration and
+ignored build caches. `-onlineServer` remains available and overrides the
+embedded endpoint for that process. A `tls://` default requires
+`SAGE_ONLINE_TLS=ON`; a bare default remains plaintext guest mode.
+
+The local file seeds new CMake build trees. To change an existing build tree,
+reconfigure it with `-DSAGE_ONLINE_SERVER_DEFAULT=<new-endpoint>` or clear that
+tree's cached value before configuring again.
+
 ## Run an Internet server
 
 Install a certificate chain and private key, then start the service with the
@@ -96,6 +122,10 @@ plaintext:
 
 ## Launch a standalone game
 
+Launch a binary with an embedded endpoint normally. The commands below are
+needed only for a build with no endpoint or when temporarily overriding the
+compiled value.
+
 ### macOS application
 
 ```bash
@@ -130,7 +160,8 @@ documented in
 
 ## Join or host a match
 
-1. Start the game with the server argument.
+1. Start the game. Pass the server argument only when the binary has no embedded
+   endpoint or needs a temporary override.
 2. Select **MULTIPLAYER > ONLINE**. Do not select **NETWORK**; that remains the
    original LAN path.
 3. On a TLS endpoint, use **Create Account** once or log in with an existing
@@ -182,5 +213,6 @@ player/game counts. During a match, relay packet counters should increase.
   compatibility generation. Incompatible public games can remain visible in
   the browser, but the client and server both reject the join.
 - **Duplicate nickname:** Online display names are case-insensitively unique.
-- **LAN regression concern:** omit `-onlineServer` and use **MULTIPLAYER >
-  NETWORK**. The custom queues and relay transport are opt-in only.
+- **LAN regression concern:** use **MULTIPLAYER > NETWORK**. LAN selects its
+  legacy transport explicitly and is unaffected by either an embedded Online
+  endpoint or `-onlineServer`.

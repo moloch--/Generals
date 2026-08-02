@@ -33,10 +33,13 @@ Common command line parameters for `GeneralsX` (Generals) and `GeneralsXZH` (Zer
 | `-replay <file>` | Play a replay file | `./GeneralsXZH -replay match.rep` |
 | `-jobs <count>` | Number of parallel replay jobs | `./GeneralsXZH -jobs 4 -replay *.rep` |
 | `-headless` | Run without graphics (replay testing) | `./GeneralsXZH -headless -replay *.rep` |
-| `-onlineServer <[tls://]host[:port]>` | Routes `MULTIPLAYER > ONLINE` through the configured standalone Online service. Use `tls://` for verified account login; a bare endpoint is plaintext guest-only development mode. | `./GeneralsXZH -onlineServer tls://online.example.org:29900` |
+| `-onlineServer <[tls://]host[:port]>` | Overrides the standalone Online service embedded at build time, or enables it when the binary has no default. Use `tls://` for verified account login; a bare endpoint is plaintext guest-only mode. | `./GeneralsXZH -onlineServer tls://online.example.org:29900` |
 
 `tls://` validates the server certificate and hostname, requires TLS 1.2 or newer,
-and never falls back to plaintext. LAN/local multiplayer is unchanged by this flag.
+and never falls back to plaintext. Modern builds may embed a default with the
+`SAGE_ONLINE_SERVER_DEFAULT` CMake cache variable; the runtime flag takes
+precedence. The committed build default is empty. LAN/local multiplayer is
+unchanged by either endpoint source.
 Custom Online joins and Quick Match require the same game product, Online
 compatibility generation, and gameplay INI CRC. Native executable CRCs are not
 compared across macOS and Windows builds.

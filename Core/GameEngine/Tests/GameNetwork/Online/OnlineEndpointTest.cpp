@@ -93,6 +93,34 @@ void Expect(bool condition, const char *message)
 	}
 }
 
+// GeneralsX @test Codex 01/08/2026 Verify the built-in default lifecycle and command-line-style override precedence.
+void TestBuiltInEndpointLifecycle()
+{
+	const char *builtInValue = GeneralsOnline::GetBuiltInOnlineServerEndpoint();
+	Expect(builtInValue != nullptr && builtInValue[0] != '\0',
+		"focused test target did not compile a non-empty Online endpoint default");
+
+	GeneralsOnline::OnlineEndpoint expected;
+	std::string error;
+	Expect(GeneralsOnline::ParseOnlineEndpoint(builtInValue, expected, &error), error.c_str());
+	const GeneralsOnline::OnlineEndpoint &initial = GeneralsOnline::GetOnlineEndpoint();
+	Expect(initial.configured && initial.host == expected.host &&
+		initial.controlPort == expected.controlPort && initial.useTLS == expected.useTLS,
+		"built-in Online endpoint was not published before runtime argument parsing");
+
+	Expect(GeneralsOnline::ConfigureOnlineEndpoint("override.example.org:31000", &error), error.c_str());
+	const GeneralsOnline::OnlineEndpoint &overridden = GeneralsOnline::GetOnlineEndpoint();
+	Expect(overridden.configured && overridden.host == "override.example.org" &&
+		overridden.controlPort == 31000 && !overridden.useTLS,
+		"runtime Online endpoint did not override the built-in default");
+
+	GeneralsOnline::ClearOnlineEndpoint();
+	const GeneralsOnline::OnlineEndpoint &restored = GeneralsOnline::GetOnlineEndpoint();
+	Expect(restored.configured && restored.host == expected.host &&
+		restored.controlPort == expected.controlPort && restored.useTLS == expected.useTLS,
+		"clearing the runtime Online endpoint did not restore the built-in default");
+}
+
 void TestEndpointParser()
 {
 	GeneralsOnline::OnlineEndpoint endpoint;
@@ -492,6 +520,7 @@ void TestTLSNeverFallsBackToPlaintext()
 // GeneralsX @feature Codex 01/08/2026 Cover Online endpoint validation and synchronized relay session publication.
 int main()
 {
+	TestBuiltInEndpointLifecycle();
 	TestEndpointParser();
 	TestSessionState();
 	TestReadyKey();

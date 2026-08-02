@@ -37,7 +37,10 @@ struct OnlineEndpoint
  */
 bool ParseOnlineEndpoint(const char *value, OnlineEndpoint &endpoint, std::string *error = nullptr);
 
-/** Parse and publish the process-wide command-line override. */
+/** Parse and publish the process-wide command-line override.
+ *
+ * This always takes precedence over a build-time default endpoint.
+ */
 bool ConfigureOnlineEndpoint(const char *value, std::string *error = nullptr);
 
 /** Return the process-wide endpoint configuration.
@@ -47,7 +50,10 @@ bool ConfigureOnlineEndpoint(const char *value, std::string *error = nullptr);
  */
 const OnlineEndpoint &GetOnlineEndpoint();
 
-/** Clear the explicit override, restoring the legacy Online path. */
+/** Return the endpoint string embedded by the build, or an empty string when disabled. */
+const char *GetBuiltInOnlineServerEndpoint();
+
+/** Clear the runtime override and restore the endpoint embedded by the build. */
 void ClearOnlineEndpoint();
 
 } // namespace GeneralsOnline

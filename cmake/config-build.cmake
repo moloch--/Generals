@@ -39,6 +39,85 @@ elseif(SAGE_ONLINE_TLS AND CMAKE_SYSTEM_NAME STREQUAL "iOS")
     message(FATAL_ERROR "SAGE_ONLINE_TLS is not supported by the iOS dependency profile")
 endif()
 
+# GeneralsX @build Codex 01/08/2026 Allow modern clients to embed a build-time Online endpoint without tracking deployment values.
+set(SAGE_ONLINE_SERVER_DEFAULT "" CACHE STRING
+    "Default [tls://]host[:port] embedded in modern Online clients; empty keeps the legacy default")
+if(NOT SAGE_ONLINE_SERVER_DEFAULT STREQUAL "")
+    string(LENGTH "${SAGE_ONLINE_SERVER_DEFAULT}" _sage_online_server_length)
+    if(_sage_online_server_length GREATER 265 OR
+       NOT SAGE_ONLINE_SERVER_DEFAULT MATCHES "^(tls://)?[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?(:[0-9]+)?$")
+        message(FATAL_ERROR "SAGE_ONLINE_SERVER_DEFAULT must be [tls://]host[:port] without paths or whitespace")
+    endif()
+
+    set(_sage_online_server_address "${SAGE_ONLINE_SERVER_DEFAULT}")
+    string(REGEX REPLACE "^tls://" "" _sage_online_server_address "${_sage_online_server_address}")
+    set(_sage_online_server_host "${_sage_online_server_address}")
+    if(_sage_online_server_address MATCHES ":([0-9]+)$")
+        set(_sage_online_server_port "${CMAKE_MATCH_1}")
+        string(REGEX REPLACE ":[0-9]+$" "" _sage_online_server_host "${_sage_online_server_address}")
+        string(LENGTH "${_sage_online_server_port}" _sage_online_server_port_length)
+        string(REGEX REPLACE "^0+" "" _sage_online_server_port_value "${_sage_online_server_port}")
+        if(_sage_online_server_port_value STREQUAL "")
+            set(_sage_online_server_port_value 0)
+        endif()
+        if(_sage_online_server_port_length GREATER 5 OR
+           _sage_online_server_port_value LESS 1 OR _sage_online_server_port_value GREATER 65535)
+            message(FATAL_ERROR "SAGE_ONLINE_SERVER_DEFAULT port must be between 1 and 65535")
+        endif()
+    endif()
+
+    string(LENGTH "${_sage_online_server_host}" _sage_online_server_host_length)
+    if(_sage_online_server_host_length GREATER 253)
+        message(FATAL_ERROR "SAGE_ONLINE_SERVER_DEFAULT host must not exceed 253 characters")
+    endif()
+
+    if(_sage_online_server_host MATCHES "^[0-9.]+$")
+        string(REPLACE "." ";" _sage_online_server_octets "${_sage_online_server_host}")
+        list(LENGTH _sage_online_server_octets _sage_online_server_octet_count)
+        if(NOT _sage_online_server_octet_count EQUAL 4)
+            message(FATAL_ERROR "SAGE_ONLINE_SERVER_DEFAULT IPv4 address is invalid")
+        endif()
+        foreach(_sage_online_server_octet IN LISTS _sage_online_server_octets)
+            string(LENGTH "${_sage_online_server_octet}" _sage_online_server_octet_length)
+            string(REGEX REPLACE "^0+" "" _sage_online_server_octet_value "${_sage_online_server_octet}")
+            if(_sage_online_server_octet_value STREQUAL "")
+                set(_sage_online_server_octet_value 0)
+            endif()
+            if(_sage_online_server_octet_length LESS 1 OR _sage_online_server_octet_length GREATER 3 OR
+               _sage_online_server_octet_value GREATER 255)
+                message(FATAL_ERROR "SAGE_ONLINE_SERVER_DEFAULT IPv4 address is invalid")
+            endif()
+        endforeach()
+    else()
+        string(REPLACE "." ";" _sage_online_server_labels "${_sage_online_server_host}")
+        foreach(_sage_online_server_label IN LISTS _sage_online_server_labels)
+            string(LENGTH "${_sage_online_server_label}" _sage_online_server_label_length)
+            if(_sage_online_server_label_length LESS 1 OR _sage_online_server_label_length GREATER 63 OR
+               NOT _sage_online_server_label MATCHES "^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?$")
+                message(FATAL_ERROR "SAGE_ONLINE_SERVER_DEFAULT DNS hostname is invalid")
+            endif()
+        endforeach()
+    endif()
+endif()
+if(NOT IS_VS6_BUILD AND SAGE_ONLINE_SERVER_DEFAULT MATCHES "^tls://" AND NOT SAGE_ONLINE_TLS)
+    message(FATAL_ERROR "A tls:// SAGE_ONLINE_SERVER_DEFAULT requires SAGE_ONLINE_TLS=ON")
+endif()
+
+set(SAGE_ONLINE_SERVER_DEFAULT_ENABLED OFF)
+set(GENERALSX_ONLINE_SERVER_DEFAULT "")
+if(NOT IS_VS6_BUILD AND NOT SAGE_ONLINE_SERVER_DEFAULT STREQUAL "")
+    set(SAGE_ONLINE_SERVER_DEFAULT_ENABLED ON)
+    set(GENERALSX_ONLINE_SERVER_DEFAULT "${SAGE_ONLINE_SERVER_DEFAULT}")
+endif()
+set(GENERALSX_GENERATED_INCLUDE_DIR "${CMAKE_BINARY_DIR}/generated")
+file(MAKE_DIRECTORY "${GENERALSX_GENERATED_INCLUDE_DIR}/GameNetwork/Online")
+configure_file(
+    "${CMAKE_SOURCE_DIR}/cmake/OnlineBuildConfig.h.in"
+    "${GENERALSX_GENERATED_INCLUDE_DIR}/GameNetwork/Online/OnlineBuildConfig.h"
+    @ONLY ESCAPE_QUOTES
+)
+target_include_directories(core_config INTERFACE "${GENERALSX_GENERATED_INCLUDE_DIR}")
+
 # macOS port option (Phase 5)
 option(SAGE_USE_MOLTENVK "Use MoltenVK for Vulkan on macOS (Phase 5 macOS port)" OFF)
 
@@ -65,6 +144,7 @@ add_feature_info(SDL3Windowing SAGE_USE_SDL3 "Using SDL3 for windowing (Linux)")
 add_feature_info(OpenALAudio SAGE_USE_OPENAL "Using OpenAL for audio (Linux)")
 add_feature_info(UpdateCheck SAGE_UPDATE_CHECK "In-game update check via GitHub Releases API")
 add_feature_info(OnlineTLS SAGE_ONLINE_TLS "Verified TLS for the custom Online service")
+add_feature_info(OnlineServerDefault SAGE_ONLINE_SERVER_DEFAULT_ENABLED "Built-in Online server endpoint")
 add_feature_info(SagePatch RTS_BUILD_OPTION_SAGE_PATCH "Build SagePatch QoL extras (macOS)")
 
 set(RTS_BUILD_OUTPUT_SUFFIX "" CACHE STRING "Suffix appended to output names of installable targets")
@@ -149,6 +229,10 @@ endif()
 # GeneralsX @build Codex 01/08/2026 Keep the replacement Online client out of the VC6 retail reference build.
 if(NOT IS_VS6_BUILD)
     target_compile_definitions(core_config INTERFACE SAGE_CUSTOM_ONLINE)
+endif()
+
+if(SAGE_ONLINE_SERVER_DEFAULT_ENABLED)
+    message(STATUS "Built-in Online server endpoint enabled")
 endif()
 
 if(SAGE_ONLINE_TLS)

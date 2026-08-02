@@ -44,6 +44,7 @@ CPackSourceConfig.cmake
 *.bak
 thumbs.db
 /CMakeUserPresets.json
+/.generalsx-local.cmake
 /.cache
 .clang-format
 /Dependencies/MaxSDK/maxsdk
