@@ -30,7 +30,9 @@ const (
 // used as the complete base environment. Context controls the child lifetime;
 // when nil, context.Background is used. On macOS and Linux, the native process
 // runs from RuntimeStateDir while asset and library lookups remain rooted in
-// the immutable payload; this contains legacy relative writes.
+// the immutable payload; this contains legacy relative writes. Windows keeps
+// the payload working directory for native asset and DLL compatibility but
+// receives RuntimeStateDir through explicit writable-state variables.
 type Config struct {
 	Root            string
 	RuntimeStateDir string
@@ -99,12 +101,13 @@ func Prepare(config Config) (*exec.Cmd, error) {
 	if err != nil {
 		return nil, err
 	}
+	// GeneralsX @bugfix Codex 02/08/2026 Expose the stable writable-state directory on every packaged platform.
+	environment.set("GENERALSX_SFX_RUNTIME_STATE", runtimeStateDir)
 
 	nativeWorkDir := workDir
 	if config.TargetOS == TargetDarwin || config.TargetOS == TargetLinux {
 		nativeWorkDir = runtimeStateDir
 		environment.set("PWD", runtimeStateDir)
-		environment.set("GENERALSX_SFX_RUNTIME_STATE", runtimeStateDir)
 	}
 	arguments := append([]string(nil), config.Args...)
 	commandContext := config.Context
@@ -516,8 +519,19 @@ func configureLinuxVulkanICDs(environment *environment, directories []string) {
 	}
 }
 
+// GeneralsX @bugfix Codex 02/08/2026 Pin Windows DXVK configuration to the verified payload.
 func configureWindows(environment *environment, root, workDir, runtimeStateDir string) error {
 	configureDXVKWritableState(environment, runtimeStateDir)
+	dxvkConfig, present, err := firstOptionalPayloadFile(root,
+		payloadFileLocation{baseDir: root, relativePath: "dxvk.conf"},
+		payloadFileLocation{baseDir: workDir, relativePath: "dxvk.conf"},
+	)
+	if err != nil {
+		return err
+	}
+	if present {
+		environment.setDefault("DXVK_CONFIG_FILE", dxvkConfig)
+	}
 	return configureRuntimeSearchPath(environment, root, workDir, "PATH", ";")
 }
 

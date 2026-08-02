@@ -272,6 +272,7 @@ func TestConfigureLinuxVulkanICDsHonorsExplicitSelection(t *testing.T) {
 func TestPrepareWindows(t *testing.T) {
 	root, workDir, executable := makePayload(t, "generalszh.exe")
 	libraryDir := makePayloadDirectory(t, root, "lib")
+	dxvkConfig := writePayloadFile(t, root, "dxvk.conf")
 	args := []string{"-win", "literal & metacharacters"}
 
 	command, err := Prepare(Config{
@@ -293,8 +294,11 @@ func TestPrepareWindows(t *testing.T) {
 	assertCommandBasics(t, command, executable, workDir, args)
 
 	environment := environmentMap(t, command.Env, true)
+	stateDir := expectedRuntimeStateDirectory(t, root)
 	assertEnvironmentValue(t, environment, "PATH", libraryDir+";"+workDir+";C:\\Tools")
 	assertDXVKStateEnvironment(t, environment, root)
+	assertEnvironmentValue(t, environment, "GENERALSX_SFX_RUNTIME_STATE", stateDir)
+	assertEnvironmentValue(t, environment, "DXVK_CONFIG_FILE", dxvkConfig)
 	assertEnvironmentValue(t, environment, "=C:", "C:\\work")
 	assertPrimaryAssetEnvironment(t, environment, root)
 	assertNoBaseAssetEnvironment(t, environment)
@@ -603,24 +607,19 @@ func TestPrepareRejectsInvalidEnvironment(t *testing.T) {
 	assertErrorContains(t, err, "invalid environment entry")
 }
 
+// GeneralsX @bugfix Codex 02/08/2026 Avoid interpreting Windows drive letters as synthetic Linux list separators.
 func TestEnvironmentListPrependRemovesDuplicates(t *testing.T) {
-	root, workDir, _ := makePayload(t, "GeneralsXZH")
-	libraryDir := makePayloadDirectory(t, root, "lib")
-	command, err := Prepare(Config{
-		Root:       root,
-		TargetOS:   TargetLinux,
-		Entrypoint: "runtime/GeneralsXZH",
-		WorkDir:    "runtime",
-		Env: []string{
-			"LD_LIBRARY_PATH=" + workDir + ":" + libraryDir + ":/usr/lib:" + workDir,
-		},
-	})
+	environment, err := newEnvironment([]string{
+		"LD_LIBRARY_PATH=/payload/runtime:/payload/lib:/usr/lib:/payload/runtime",
+	}, false)
 	if err != nil {
-		t.Fatalf("Prepare() error = %v", err)
+		t.Fatalf("newEnvironment() error = %v", err)
 	}
+	environment.prependList("LD_LIBRARY_PATH", "/payload/runtime", ":")
+	environment.prependList("LD_LIBRARY_PATH", "/payload/lib", ":")
 
-	environment := environmentMap(t, command.Env, false)
-	assertEnvironmentValue(t, environment, "LD_LIBRARY_PATH", libraryDir+":"+workDir+":/usr/lib")
+	values := environmentMap(t, environment.entriesCopy(), false)
+	assertEnvironmentValue(t, values, "LD_LIBRARY_PATH", "/payload/lib:/payload/runtime:/usr/lib")
 }
 
 func TestExitCode(t *testing.T) {

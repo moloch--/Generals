@@ -382,6 +382,7 @@ func TestWriteCompressedPayloadPreservesSafeSymlinkForNonWindowsTarget(t *testin
 	t.Fatal("safe symlink is missing from generated manifest")
 }
 
+// GeneralsX @bugfix Codex 02/08/2026 Respect the Windows cache-override security contract in native launcher tests.
 func TestRunBuildsRealPackedLauncherWithoutTouchingModule(t *testing.T) {
 	if testing.Short() {
 		t.Skip("real Go build is skipped in short mode")
@@ -476,8 +477,18 @@ func TestRunBuildsRealPackedLauncherWithoutTouchingModule(t *testing.T) {
 	}
 
 	cacheRoot := filepath.Join(root, "cache")
+	commandEnvironment := removeEnvironment(os.Environ(), "GX_SFX_CACHE")
+	if runtime.GOOS == "windows" {
+		localAppData := filepath.Join(root, "local-app-data")
+		cacheRoot = filepath.Join(localAppData, "GeneralsX", "sfx")
+		commandEnvironment = overrideEnvironment(commandEnvironment, map[string]string{
+			"LOCALAPPDATA": localAppData,
+		})
+	} else {
+		commandEnvironment = append(commandEnvironment, "GX_SFX_CACHE="+cacheRoot)
+	}
 	infoCommand := exec.Command(outputPath, "--sfx-info")
-	infoCommand.Env = append(os.Environ(), "GX_SFX_CACHE="+cacheRoot)
+	infoCommand.Env = commandEnvironment
 	infoOutput, err := infoCommand.CombinedOutput()
 	if err != nil {
 		t.Fatalf("run packed launcher --sfx-info: %v\n%s", err, infoOutput)
@@ -489,6 +500,7 @@ func TestRunBuildsRealPackedLauncherWithoutTouchingModule(t *testing.T) {
 		"Target:              " + runtime.GOOS + "/" + runtime.GOARCH,
 		"Entrypoint:          bin/game",
 		"Working directory:   bin",
+		"Cache root:          " + cacheRoot,
 		fmt.Sprintf("Manifest entries:    %d", 2+symlinkCount),
 	} {
 		if !strings.Contains(infoText, expected) {
@@ -497,7 +509,7 @@ func TestRunBuildsRealPackedLauncherWithoutTouchingModule(t *testing.T) {
 	}
 
 	verifyCommand := exec.Command(outputPath, "--sfx-verify")
-	verifyCommand.Env = append(os.Environ(), "GX_SFX_CACHE="+cacheRoot)
+	verifyCommand.Env = commandEnvironment
 	verifyOutput, err := verifyCommand.CombinedOutput()
 	if err != nil {
 		t.Fatalf("run packed launcher --sfx-verify: %v\n%s", err, verifyOutput)

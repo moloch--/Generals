@@ -92,7 +92,7 @@ func TestWindowsProgressIndeterminateTicker(t *testing.T) {
 	}
 }
 
-// GeneralsX @test Codex 02/08/2026 Provide an opt-in native window smoke test for interactive Windows validation.
+// GeneralsX @bugfix Codex 02/08/2026 Provide an opt-in native window smoke test for interactive Windows validation.
 func TestWindowsProgressVisualSmoke(t *testing.T) {
 	if os.Getenv("GENERALSX_SFX_PROGRESS_VISUAL_TEST") != "1" {
 		t.Skip("set GENERALSX_SFX_PROGRESS_VISUAL_TEST=1 on an interactive Windows desktop")

@@ -144,13 +144,18 @@ native entrypoint and manifest working directory are resolved inside the stage
 root before launch. On macOS and Linux, the child process itself runs with
 `PWD` and its current directory set to a private, product-stable
 `.runtime-state` directory outside the immutable payload. This contains legacy
-relative writes such as GameSpy identity/queue files and DXVK state while
-asset, library, and configuration paths continue to reference the verified
-stage. SFX mode also makes the Unix platform filesystem resolve relative reads
-only against that asset root (then normal BIG archives) and relative writes
-only against `.runtime-state`, so writable files cannot shadow verified loose
-or archived assets. Windows retains the manifest working directory as its
-process working directory because its legacy filesystem assumptions differ.
+relative writes and DXVK state while asset, library, and configuration paths
+continue to reference the verified stage. SFX mode also makes the Unix
+platform filesystem resolve relative reads only against that asset root (then
+normal BIG archives) and relative writes only against `.runtime-state`, so
+writable files cannot shadow verified loose or archived assets. Windows keeps
+the manifest working directory for native loose-asset and DLL compatibility,
+but receives the same state directory through
+`GENERALSX_SFX_RUNTIME_STATE`, explicit DXVK cache/log paths, and an absolute
+verified `DXVK_CONFIG_FILE` by default. Explicit inherited configuration
+overrides retain precedence. Modern builds disable the legacy GameSpy SDK's
+relative disk profile, transfer, and failed-stats queues; configured
+replacement Online sessions bypass those SDK queues entirely.
 
 The packaged executable is a game runtime, not a mod editor. Unix developer
 flows that write a relative temporary file and then expect to read it through

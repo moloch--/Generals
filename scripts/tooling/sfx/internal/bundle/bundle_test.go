@@ -17,6 +17,7 @@ import (
 	"time"
 )
 
+// GeneralsX @bugfix Codex 02/08/2026 Use host-representable source modes for filesystem-backed bundle fixtures.
 func TestWriteTarDeterministicRoundTrip(t *testing.T) {
 	source := t.TempDir()
 	mustMkdir(t, filepath.Join(source, "bin"), 0o750)
@@ -28,8 +29,8 @@ func TestWriteTarDeterministicRoundTrip(t *testing.T) {
 	options := PackOptions{
 		Product:    "GeneralsXZH",
 		Version:    "test-1",
-		TargetOS:   "darwin",
-		TargetArch: "arm64",
+		TargetOS:   runtime.GOOS,
+		TargetArch: runtime.GOARCH,
 		Entrypoint: "bin/run.sh",
 		WorkDir:    "bin",
 		Epoch:      time.Unix(1_700_000_000, 0),
@@ -81,6 +82,7 @@ func TestWriteTarDeterministicRoundTrip(t *testing.T) {
 }
 
 // GeneralsX @feature Codex 01/08/2026 Cover byte-accurate extraction progress without changing ExtractTar callers.
+// GeneralsX @bugfix Codex 02/08/2026 Match the manifest target to host filesystem mode semantics.
 func TestExtractTarWithProgressReportsRegularFileBytes(t *testing.T) {
 	source := t.TempDir()
 	mustMkdir(t, filepath.Join(source, "data"), 0o755)
@@ -92,8 +94,8 @@ func TestExtractTarWithProgressReportsRegularFileBytes(t *testing.T) {
 	manifest, err := WriteTar(source, &archive, PackOptions{
 		Product:    "GeneralsXZH",
 		Version:    "test",
-		TargetOS:   "darwin",
-		TargetArch: "arm64",
+		TargetOS:   runtime.GOOS,
+		TargetArch: runtime.GOARCH,
 		Entrypoint: "run",
 		Epoch:      time.Unix(1234, 0),
 	})
@@ -216,6 +218,7 @@ func TestWriteTarRejectsEscapingAndDisabledSymlinks(t *testing.T) {
 	}
 }
 
+// GeneralsX @bugfix Codex 02/08/2026 Keep exclusion and limit coverage independent of Unix execute bits.
 func TestWriteTarExclusionAndLimits(t *testing.T) {
 	source := t.TempDir()
 	mustWrite(t, filepath.Join(source, "run"), []byte("run"), 0o755)
@@ -224,8 +227,8 @@ func TestWriteTarExclusionAndLimits(t *testing.T) {
 	options := PackOptions{
 		Product:    "GeneralsXZH",
 		Version:    "test",
-		TargetOS:   "linux",
-		TargetArch: "amd64",
+		TargetOS:   runtime.GOOS,
+		TargetArch: runtime.GOARCH,
 		Entrypoint: "run",
 		Exclude: func(name string, _ fs.DirEntry) (bool, error) {
 			return name == "excluded", nil
@@ -402,6 +405,35 @@ func TestManifestRejectsUnsafeInputs(t *testing.T) {
 	}
 }
 
+// GeneralsX @bugfix Codex 02/08/2026 Preserve explicit Unix entrypoint and directory mode coverage on Windows hosts.
+func TestManifestRejectsUnsafeUnixExecutionModes(t *testing.T) {
+	for _, targetOS := range []string{"darwin", "linux"} {
+		t.Run(targetOS+"_entrypoint", func(t *testing.T) {
+			manifest := validTestManifest()
+			manifest.TargetOS = targetOS
+			manifest.Entries[0].Mode = 0o644
+			if err := manifest.Validate(); err == nil || !strings.Contains(err.Error(), "not executable") {
+				t.Fatalf("Validate non-executable entrypoint error = %v", err)
+			}
+		})
+
+		t.Run(targetOS+"_directory", func(t *testing.T) {
+			manifest := validTestManifest()
+			manifest.TargetOS = targetOS
+			entrypoint := manifest.Entries[0]
+			entrypoint.Path = "bin/run"
+			manifest.Entrypoint = entrypoint.Path
+			manifest.Entries = []Entry{
+				{Path: "bin", Type: EntryDirectory, Mode: 0o600},
+				entrypoint,
+			}
+			if err := manifest.Validate(); err == nil || !strings.Contains(err.Error(), "not traversable") {
+				t.Fatalf("Validate non-traversable directory error = %v", err)
+			}
+		})
+	}
+}
+
 func TestManifestRejectsEscapingSymlinkAndCycle(t *testing.T) {
 	base := validTestManifest()
 	base.TargetOS = "linux"
@@ -558,6 +590,7 @@ func TestMarshalManifestRejectsOversizedEncoding(t *testing.T) {
 	}
 }
 
+// GeneralsX @bugfix Codex 02/08/2026 Keep hostile-archive coverage independent of Unix execute bits.
 func TestExtractTarRejectsTamperingAndUnexpectedEntries(t *testing.T) {
 	source := t.TempDir()
 	mustWrite(t, filepath.Join(source, "run"), []byte("ABCDE"), 0o755)
@@ -565,8 +598,8 @@ func TestExtractTarRejectsTamperingAndUnexpectedEntries(t *testing.T) {
 	manifest, err := WriteTar(source, &payload, PackOptions{
 		Product:    "GeneralsXZH",
 		Version:    "test",
-		TargetOS:   "linux",
-		TargetArch: "amd64",
+		TargetOS:   runtime.GOOS,
+		TargetArch: runtime.GOARCH,
 		Entrypoint: "run",
 		Epoch:      time.Unix(42, 0),
 	})

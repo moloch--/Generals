@@ -79,6 +79,62 @@ render_icon() {
         --out "${iconset}/${name}" >/dev/null
 }
 
+# GeneralsX @bugfix Codex 02/08/2026 Bypass macOS 26 iconutil packing failures with direct ICNS assembly.
+assemble_icns() {
+    local iconset="$1"
+    local output="$2"
+
+    perl - "${iconset}" "${output}" <<'PERL'
+use strict;
+use warnings;
+
+my ($iconset, $output) = @ARGV;
+my @chunks = (
+    [q(icp4), q(icon_16x16.png)],
+    [q(ic11), q(icon_16x16@2x.png)],
+    [q(icp5), q(icon_32x32.png)],
+    [q(ic12), q(icon_32x32@2x.png)],
+    [q(ic07), q(icon_128x128.png)],
+    [q(ic13), q(icon_128x128@2x.png)],
+    [q(ic08), q(icon_256x256.png)],
+    [q(ic14), q(icon_256x256@2x.png)],
+    [q(ic09), q(icon_512x512.png)],
+    [q(ic10), q(icon_512x512@2x.png)],
+);
+my @encoded_chunks;
+my $total_length = 8;
+
+for my $chunk (@chunks) {
+    my ($type, $filename) = @{$chunk};
+    my $path = "${iconset}/${filename}";
+    open my $input, q(<:raw), $path or die "Unable to read ${path}: $!\n";
+    local $/;
+    my $payload = <$input>;
+    close $input or die "Unable to close ${path}: $!\n";
+    defined $payload or die "Unable to read PNG payload from ${path}.\n";
+    substr($payload, 0, 8) eq "\x89PNG\r\n\x1a\n"
+        or die "Icon input is not a PNG file: ${path}.\n";
+
+    my $chunk_length = 8 + length($payload);
+    $chunk_length <= 0xffffffff
+        or die "Icon chunk is too large for ICNS: ${path}.\n";
+    push @encoded_chunks, [$type, $chunk_length, $payload];
+    $total_length += $chunk_length;
+}
+$total_length <= 0xffffffff or die "Generated ICNS file is too large.\n";
+
+open my $destination, q(>:raw), $output
+    or die "Unable to create ${output}: $!\n";
+print {$destination} q(icns), pack(q(N), $total_length)
+    or die "Unable to write ${output}: $!\n";
+for my $chunk (@encoded_chunks) {
+    print {$destination} $chunk->[0], pack(q(N), $chunk->[1]), $chunk->[2]
+        or die "Unable to write ${output}: $!\n";
+}
+close $destination or die "Unable to close ${output}: $!\n";
+PERL
+}
+
 generate_icns() {
     local source="$1"
     local output="$2"
@@ -116,7 +172,7 @@ generate_icns() {
     render_icon "${source}" "${iconset}" 512 icon_256x256@2x.png
     render_icon "${source}" "${iconset}" 512 icon_512x512.png
     render_icon "${source}" "${iconset}" 1024 icon_512x512@2x.png
-    iconutil -c icns "${iconset}" -o "${output}"
+    assemble_icns "${iconset}" "${output}"
 
     iconutil -c iconset "${output}" -o "${verify_iconset}"
     while read -r file expected; do
@@ -251,7 +307,7 @@ fi
 if [[ "$(uname -s)" != "Darwin" || "$(uname -m)" != "arm64" ]]; then
     fail "The SFX app must be packaged on macOS/ARM64."
 fi
-for required_command in codesign file iconutil lipo otool plutil sips xattr xcrun; do
+for required_command in codesign file iconutil lipo otool perl plutil sips xattr xcrun; do
     command -v "${required_command}" >/dev/null 2>&1 ||
         fail "Required command is unavailable: ${required_command}."
 done

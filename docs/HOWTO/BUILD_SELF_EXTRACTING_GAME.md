@@ -231,9 +231,9 @@ The content key combines the manifest and compressed-payload SHA-256 values.
 Changing either publishes a separate cache entry rather than updating an
 existing runtime in place.
 
-The native payload stays immutable. On macOS and Linux, the game process uses
-a separate product-stable writable directory for its current directory,
-GameSpy identity/queue files, and DXVK cache/log state:
+The native payload stays immutable. Every platform has a separate
+product-stable writable directory. On macOS and Linux it is also the game
+process current directory; on Windows it stores explicitly routed DXVK state:
 
 ```text
 cache-root/
@@ -251,9 +251,12 @@ precedence and deliberately opt those resources out of that guarantee. With
 the default environment, the Unix platform filesystem resolves relative reads
 against the immutable asset root before normal BIG archives and routes
 relative writes to `.runtime-state`; writable state therefore cannot override
-packaged assets.
-Windows retains the payload's manifest working directory as its process current
-directory for compatibility, while DXVK state is directed to `.runtime-state`.
+packaged assets. Windows retains the payload's manifest working directory for
+native loose-asset, DXVK, and DLL compatibility. The launcher supplies an
+absolute verified `DXVK_CONFIG_FILE` by default, directs DXVK cache/log output to
+`.runtime-state`, and exposes that directory as `GENERALSX_SFX_RUNTIME_STATE`.
+Modern builds compile the obsolete GameSpy disk profile/failed-stats queues
+out; configured replacement Online sessions bypass those legacy SDK paths.
 Use the normal unpacked development build, not the SFX, for editor workflows
 that rely on writing and then reading relative temporary files.
 
@@ -427,10 +430,10 @@ beside `generalszh.exe`; curl uses Schannel and does not require OpenSSL DLLs.
 They export all names the current game imports, but audio/video behavior is
 unimplemented and compatibility with retail DLL implementations is
 unvalidated. Do not distribute or describe the Windows artifact as a working
-game build. Windows also retains the payload as its process working directory,
-so remaining legacy relative writes can invalidate the immutable cache; that
-routing must be completed and tested with the native runtime before Windows
-gameplay support is claimed.
+game build until native gameplay validation is complete. Windows intentionally
+retains the verified payload as its process working directory; DXVK writes are
+relocated explicitly and modern GameSpy SDK disk queues are disabled so warm
+cache validation remains strict.
 
 ## Deterministic and Reproducible Inputs
 

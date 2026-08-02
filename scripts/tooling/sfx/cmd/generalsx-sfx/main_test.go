@@ -294,7 +294,8 @@ func TestValidateExtractedRuntimeRejectsSameSizeAssetTampering(t *testing.T) {
 	}
 }
 
-func TestRuntimeWritesDoNotInvalidateExtractedRuntime(t *testing.T) {
+// GeneralsX @bugfix Codex 02/08/2026 Keep cross-platform DXVK state outside the verified payload.
+func TestDXVKWritesDoNotInvalidateExtractedRuntime(t *testing.T) {
 	embedded := makeTestBundle(t)
 	destination := filepath.Join(t.TempDir(), "runtime")
 	if err := extractEmbeddedPayload(context.Background(), embedded, destination); err != nil {
@@ -316,9 +317,6 @@ func TestRuntimeWritesDoNotInvalidateExtractedRuntime(t *testing.T) {
 	if stateDir == "" || environment["DXVK_LOG_PATH"] != stateDir {
 		t.Fatalf("DXVK writable state environment = %#v", environment)
 	}
-	if command.Dir != stateDir {
-		t.Fatalf("native working directory = %q, want runtime state %q", command.Dir, stateDir)
-	}
 	if relative, err := filepath.Rel(destination, stateDir); err == nil &&
 		relative != ".." &&
 		!strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
@@ -330,13 +328,43 @@ func TestRuntimeWritesDoNotInvalidateExtractedRuntime(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(stateDir, "GeneralsXZH_d3d9.log"), []byte("log"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	if err := validateExtractedRuntime(context.Background(), destination, embedded.manifest); err != nil {
+		t.Fatalf("DXVK state outside the payload invalidated runtime reuse: %v", err)
+	}
+}
+
+// GeneralsX @bugfix Codex 02/08/2026 Exercise the POSIX-only writable working-directory contract without imposing it on Windows.
+func TestPOSIXRelativeWritesDoNotInvalidateExtractedRuntime(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows deliberately retains the manifest working directory for legacy filesystem compatibility")
+	}
+
+	embedded := makeTestBundle(t)
+	destination := filepath.Join(t.TempDir(), "runtime")
+	if err := extractEmbeddedPayload(context.Background(), embedded, destination); err != nil {
+		t.Fatal(err)
+	}
+	command, err := launch.Prepare(launch.Config{
+		Root:       destination,
+		TargetOS:   embedded.manifest.TargetOS,
+		Entrypoint: embedded.manifest.Entrypoint,
+		WorkDir:    embedded.manifest.WorkDir,
+		Env:        []string{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stateDir := environmentValues(command.Env)["DXVK_STATE_CACHE_PATH"]
+	if command.Dir != stateDir {
+		t.Fatalf("native working directory = %q, want runtime state %q", command.Dir, stateDir)
+	}
 	for _, gameSpyState := range []string{"gp.info", "id.bin", "gstats.dat"} {
 		if err := os.WriteFile(filepath.Join(command.Dir, gameSpyState), []byte("state"), 0o600); err != nil {
 			t.Fatal(err)
 		}
 	}
 	if err := validateExtractedRuntime(context.Background(), destination, embedded.manifest); err != nil {
-		t.Fatalf("DXVK state outside the payload invalidated runtime reuse: %v", err)
+		t.Fatalf("relative state outside the payload invalidated runtime reuse: %v", err)
 	}
 }
 

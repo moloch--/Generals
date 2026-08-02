@@ -1,4 +1,4 @@
-// GeneralsX @test Codex 02/08/2026 Keep every launcher dependency represented in the embedded notice.
+// GeneralsX @bugfix Codex 02/08/2026 Keep every launcher dependency represented in the embedded notice.
 package notices
 
 import (
