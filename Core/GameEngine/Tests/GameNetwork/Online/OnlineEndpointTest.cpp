@@ -320,7 +320,7 @@ void TestGameEndDisposition()
 		"started-game connection loss did not terminate the relay session visibly");
 }
 
-// GeneralsX @test OpenAI 02/08/2026 Execute the production staging-exit policy against real relay session state.
+// GeneralsX @bugfix OpenAI 02/08/2026 Execute the production staging-exit policy against real relay session state.
 void TestStagingRoomExitLifecycle()
 {
 	auto configureRelaySession = []() {
@@ -388,7 +388,7 @@ void TestStagingRoomExitLifecycle()
 	GeneralsOnline::ClearOnlineSession();
 }
 
-// GeneralsX @test OpenAI 02/08/2026 Reset Loading suppression when explicit abort cleanup clears game state.
+// GeneralsX @bugfix OpenAI 02/08/2026 Reset Loading suppression when explicit abort cleanup clears game state.
 void TestBuddyLoadingStatusLifecycle()
 {
 	using GeneralsOnline::OnlineBuddyStatusKind;

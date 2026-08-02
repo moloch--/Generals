@@ -87,7 +87,7 @@ bool ExpectBits(const char *name, double actual, std::uint64_t expected)
 
 } // namespace
 
-// GeneralsX @test OpenAI 02/08/2026 Detect CRT, x87, or architecture-specific fallback in simulation math.
+// GeneralsX @bugfix OpenAI 02/08/2026 Detect CRT, x87, or architecture-specific fallback in simulation math.
 int main()
 {
 	const float forty = FloatFromBits(UINT32_C(0x42200000));

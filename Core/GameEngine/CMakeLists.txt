@@ -1264,7 +1264,7 @@ if(RTS_BUILD_ONLINE_TESTS AND NOT IS_VS6_BUILD)
         ${CMAKE_SOURCE_DIR}/Core/Libraries/Include
         ${CMAKE_SOURCE_DIR}/Dependencies/Utility
     )
-    # GeneralsX @test Codex 01/08/2026 Run the native relay fixture on POSIX and MSVC.
+    # GeneralsX @build Codex 01/08/2026 Run the native relay fixture on POSIX and MSVC.
     # MinGW's win32 thread model remains compile-covered by the full game targets.
     if(NOT MINGW)
         target_sources(generalsx_online_endpoint_tests PRIVATE
@@ -1288,7 +1288,7 @@ if(RTS_BUILD_ONLINE_TESTS AND NOT IS_VS6_BUILD)
             d3d8lib
         )
     endif()
-    # GeneralsX @test Codex 01/08/2026 Exercise the non-empty built-in endpoint path without embedding a deployment address in source.
+    # GeneralsX @build Codex 01/08/2026 Exercise the non-empty built-in endpoint path without embedding a deployment address in source.
     target_compile_definitions(generalsx_online_endpoint_tests PRIVATE
         SAGE_ONLINE_SERVER_DEFAULT="192.0.2.10:30000"
     )
@@ -1300,11 +1300,12 @@ if(RTS_BUILD_ONLINE_TESTS AND NOT IS_VS6_BUILD)
         target_link_libraries(generalsx_online_endpoint_tests PRIVATE CURL::libcurl)
     endif()
     if(WIN32)
-        target_link_libraries(generalsx_online_endpoint_tests PRIVATE ws2_32)
+        # GeneralsX @build Codex 02/08/2026 Link the native relay fixture's Winsock and timeGetTime imports explicitly.
+        target_link_libraries(generalsx_online_endpoint_tests PRIVATE ws2_32 winmm)
     endif()
     add_test(NAME generalsx_online_endpoint_tests COMMAND generalsx_online_endpoint_tests)
 
-    # GeneralsX @test OpenAI 02/08/2026 Pin WWMath's deterministic GameMath dispatch to cross-platform bit patterns.
+    # GeneralsX @build OpenAI 02/08/2026 Pin WWMath's deterministic GameMath dispatch to cross-platform bit patterns.
     if(SAGE_USE_DETERMINISTIC_MATH)
         add_executable(generalsx_wwmath_determinism_tests
             Tests/GameNetwork/Online/WWMathDeterminismTest.cpp
