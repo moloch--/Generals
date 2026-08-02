@@ -398,6 +398,7 @@ void WeaponTemplate::reset()
 
 	// No matter what we have now, we want to convert it to frames from msec.
 	// ShotDelay used to use parseDurationUnsignedInt, and we are expanding on that.
+	// GeneralsX @bugfix OpenAI 02/08/2026 Keep simulation calculations deterministic and safe across platforms.
 	self->m_minDelayBetweenShots = WWMath::Ceil(ConvertDurationFromMsecsToFrames((Real)self->m_minDelayBetweenShots));
 	self->m_maxDelayBetweenShots = WWMath::Ceil(ConvertDurationFromMsecsToFrames((Real)self->m_maxDelayBetweenShots));
 

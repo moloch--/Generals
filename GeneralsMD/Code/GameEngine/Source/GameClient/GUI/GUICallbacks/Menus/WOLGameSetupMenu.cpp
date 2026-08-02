@@ -1675,9 +1675,9 @@ void WOLGameSetupMenuUpdate( WindowLayout * layout, void *userData)
 			{
 				//launchGameNext = TRUE;
 				//TheShell->pop();
-				TheGameSpyGame->launchGame();
-				if (TheGameSpyInfo) // this can be blown away by a disconnect on the map transfer screen
-					TheGameSpyInfo->leaveStagingRoom();
+				// GeneralsX @bugfix OpenAI 02/08/2026 Mark staging detach successful only after the gameplay handoff completes.
+				if (TheGameSpyGame->launchGame() && TheGameSpyInfo)
+					TheGameSpyInfo->leaveStagingRoom(TRUE);
 				return;
 			}
 			else if (NATState == NATSTATE_FAILED)

@@ -144,7 +144,8 @@ public:
 	virtual void resetAccepted() override;															///< Reset the accepted flag on all players
 
 	virtual void startGame(Int gameID) override;														///< Mark our game as started and record the game ID.
-	void launchGame();																			///< NAT negotiation has finished - really start
+	// GeneralsX @bugfix OpenAI 02/08/2026 Report whether launch reached gameplay so aborts cannot retain an Online relay.
+	Bool launchGame();																			///< NAT negotiation has finished - really start
 	virtual Int getLocalSlotNum() const override;										///< Get the local slot number, or -1 if we're not present
 
 	void setGameName( UnicodeString name ) { m_gameName = name; }

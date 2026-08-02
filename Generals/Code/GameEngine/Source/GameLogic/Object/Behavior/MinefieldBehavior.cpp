@@ -449,6 +449,7 @@ void MinefieldBehavior::onDamage( DamageInfo *damageInfo )
 
 	for (;;)
 	{
+		// GeneralsX @bugfix OpenAI 02/08/2026 Keep simulation calculations deterministic and safe across platforms.
 		Real virtualMinesExpectedF = WWMath::Div_FixNaN((Real)d->m_numVirtualMines * body->getHealth(), body->getMaxHealth(), 0.0f);
 		Int virtualMinesExpected =
 			damageInfo->in.m_damageType == DAMAGE_HEALING ?

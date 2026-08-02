@@ -281,6 +281,7 @@ public:
 			Real dy = primary->y - secondary->y;
 
 			//Calc length
+			// GeneralsX @bugfix OpenAI 02/08/2026 Keep simulation calculations deterministic and safe across platforms.
 			Real length = WWMath::SqrtOrigin( dx*dx + dy*dy );
 
 			//Normalize length

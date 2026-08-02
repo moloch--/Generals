@@ -457,6 +457,7 @@ public:
 
 		Coord3D intermedPt;
 		Bool intermed = false;
+		// GeneralsX @bugfix OpenAI 02/08/2026 Keep simulation calculations deterministic and safe across platforms.
 		Real orient = WWMath::Atan2Origin(ppinfo.runwayPrep.y - ppinfo.parkingSpace.y, ppinfo.runwayPrep.x - ppinfo.parkingSpace.x);
 		if (fabs(stdAngleDiff(orient, ppinfo.parkingOrientation)) > PI/128)
 		{

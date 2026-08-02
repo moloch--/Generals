@@ -1078,9 +1078,9 @@ void WOLQuickMatchMenuUpdate( WindowLayout * layout, void *userData)
 			NATStateType NATState = TheNAT->update();
 			if (NATState == NATSTATE_DONE)
 			{
-				TheGameSpyGame->launchGame();
-				if (TheGameSpyInfo) // this can be blown away by a disconnect on the map transfer screen
-					TheGameSpyInfo->leaveStagingRoom();
+				// GeneralsX @bugfix OpenAI 02/08/2026 Do not misclassify transport or map failures as successful launch detaches.
+				if (TheGameSpyGame->launchGame() && TheGameSpyInfo)
+					TheGameSpyInfo->leaveStagingRoom(TRUE);
 				return; // don't do any more processing this frame, in case the screen goes away
 			}
 			else if (NATState == NATSTATE_FAILED)

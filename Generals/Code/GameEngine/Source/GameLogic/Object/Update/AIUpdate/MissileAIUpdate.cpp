@@ -223,6 +223,7 @@ void MissileAIUpdate::projectileFireAtObjectOrPosition( const Object *victim, co
 	Real deltaZ = victimPos->z - obj->getPosition()->z;
 	Real dx = victimPos->x - obj->getPosition()->x;
 	Real dy = victimPos->y - obj->getPosition()->y;
+	// GeneralsX @bugfix OpenAI 02/08/2026 Keep simulation calculations deterministic and safe across platforms.
 	Real xyDist = WWMath::SqrtOrigin(sqr(dx)+sqr(dy));
 	if (xyDist<1) xyDist = 1;
 	Real zFactor = 0;

@@ -134,6 +134,7 @@
             "cacheVariables": {
                 "RTS_FLAGS": "/W3",
                 "SAGE_ONLINE_TLS": "ON",
+                "SAGE_USE_DETERMINISTIC_MATH": "ON",
                 "SAGE_USE_DX8": "ON",
                 "RTS_BUILD_OPTION_SAGE_PATCH": "OFF"
             },
@@ -217,6 +218,7 @@
                 "SAGE_USE_SDL3": "ON",
                 "SAGE_USE_OPENAL": "ON",
                 "SAGE_USE_GLM": "ON",
+                "SAGE_USE_DETERMINISTIC_MATH": "ON",
                 "SAGE_UPDATE_CHECK": "ON",
                 "RTS_CRASHDUMP_ENABLE": "OFF",
                 "RTS_BUILD_OPTION_FFMPEG": "ON"
@@ -240,6 +242,7 @@
                 "SAGE_USE_OPENAL": "ON",
                 "SAGE_USE_GLM": "ON",
                 "SAGE_USE_MOLTENVK": "ON",
+                "SAGE_USE_DETERMINISTIC_MATH": "ON",
                 "SAGE_UPDATE_CHECK": "ON",
                 "RTS_CRASHDUMP_ENABLE": "OFF",
                 "RTS_BUILD_OPTION_FFMPEG": "ON",

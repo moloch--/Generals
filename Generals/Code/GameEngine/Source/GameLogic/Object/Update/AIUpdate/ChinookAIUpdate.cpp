@@ -159,6 +159,7 @@ public:
 		Region3D terrainExtent;
 		TheTerrainLogic->getExtent( &terrainExtent );
 		const Real FUDGE = 1.2f;
+		// GeneralsX @bugfix OpenAI 02/08/2026 Keep simulation calculations deterministic and safe across platforms.
 		Real HUGE_DIST = FUDGE * WWMath::SqrtOrigin(sqr(terrainExtent.hi.x - terrainExtent.lo.x) + sqr(terrainExtent.hi.y - terrainExtent.lo.y));
 
 		exitCoord.x += dir->x * HUGE_DIST;

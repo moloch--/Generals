@@ -37,36 +37,62 @@
 #error "Missing a math library"
 #endif
 #include "Common/STLTypedefs.h"
+#include "WWMath/wwmath.h"
 
 #define USUAL_TOLERANCE 1.0f
 
-#ifndef SAGE_USE_GLM
+// GeneralsX @bugfix OpenAI 02/08/2026 Use one explicit reduction tree for DirectX and GLM Bezier math.
 class BezierMath
 {
 public:
-	static void D3DXVec4Transform(D3DXVECTOR4* out, const D3DXVECTOR4* v, const D3DXMATRIX* m)
+#ifdef SAGE_USE_GLM
+	static void Vec4Transform(glm::vec4 *out, const glm::vec4 *v, const glm::mat4 *m)
 	{
-#if USE_DETERMINISTIC_MATH
+#if defined(USE_DETERMINISTIC_MATH)
 		const float x = v->x, y = v->y, z = v->z, w = v->w;
-		out->x = ((x * m->m[0][0] + y * m->m[1][0]) + z * m->m[2][0]) + w * m->m[3][0];
-		out->y = ((x * m->m[0][1] + y * m->m[1][1]) + z * m->m[2][1]) + w * m->m[3][1];
-		out->z = ((x * m->m[0][2] + y * m->m[1][2]) + z * m->m[2][2]) + w * m->m[3][2];
-		out->w = ((x * m->m[0][3] + y * m->m[1][3]) + z * m->m[2][3]) + w * m->m[3][3];
+		out->x = WWMath::Pairwise_Multiply_Add_4(x, (*m)[0][0], y, (*m)[1][0], z, (*m)[2][0], w, (*m)[3][0]);
+		out->y = WWMath::Pairwise_Multiply_Add_4(x, (*m)[0][1], y, (*m)[1][1], z, (*m)[2][1], w, (*m)[3][1]);
+		out->z = WWMath::Pairwise_Multiply_Add_4(x, (*m)[0][2], y, (*m)[1][2], z, (*m)[2][2], w, (*m)[3][2]);
+		out->w = WWMath::Pairwise_Multiply_Add_4(x, (*m)[0][3], y, (*m)[1][3], z, (*m)[2][3], w, (*m)[3][3]);
+#else
+		*out = (*m) * (*v);
+#endif
+	}
+
+	static float Vec4Dot(const glm::vec4 *a, const glm::vec4 *b)
+	{
+#if defined(USE_DETERMINISTIC_MATH)
+		return WWMath::Pairwise_Multiply_Add_4(
+			a->x, b->x, a->y, b->y, a->z, b->z, a->w, b->w);
+#else
+		return glm::dot(*a, *b);
+#endif
+	}
+#else
+	static void Vec4Transform(D3DXVECTOR4 *out, const D3DXVECTOR4 *v, const D3DXMATRIX *m)
+	{
+#if defined(USE_DETERMINISTIC_MATH)
+		const float x = v->x, y = v->y, z = v->z, w = v->w;
+		out->x = WWMath::Pairwise_Multiply_Add_4(x, m->m[0][0], y, m->m[1][0], z, m->m[2][0], w, m->m[3][0]);
+		out->y = WWMath::Pairwise_Multiply_Add_4(x, m->m[0][1], y, m->m[1][1], z, m->m[2][1], w, m->m[3][1]);
+		out->z = WWMath::Pairwise_Multiply_Add_4(x, m->m[0][2], y, m->m[1][2], z, m->m[2][2], w, m->m[3][2]);
+		out->w = WWMath::Pairwise_Multiply_Add_4(x, m->m[0][3], y, m->m[1][3], z, m->m[2][3], w, m->m[3][3]);
 #else
 		::D3DXVec4Transform(out, v, m);
 #endif
 	}
 
-	static float D3DXVec4Dot(const D3DXVECTOR4* a, const D3DXVECTOR4* b)
+	static float Vec4Dot(const D3DXVECTOR4 *a, const D3DXVECTOR4 *b)
 	{
-#if USE_DETERMINISTIC_MATH
-		return ((a->x * b->x + a->y * b->y) + a->z * b->z) + a->w * b->w;
+#if defined(USE_DETERMINISTIC_MATH)
+		return WWMath::Pairwise_Multiply_Add_4(
+			a->x, b->x, a->y, b->y, a->z, b->z, a->w, b->w);
 #else
 		return ::D3DXVec4Dot(a, b);
 #endif
 	}
-};
 #endif
+};
 
 class BezierSegment
 {

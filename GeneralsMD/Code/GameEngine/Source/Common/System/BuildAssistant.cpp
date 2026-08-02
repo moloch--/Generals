@@ -806,6 +806,7 @@ LegalBuildCode BuildAssistant::isLocationClearOfObjects( const Coord3D *worldPos
 	if (myFactoryExitWidth>0) {
 		myExitPos = *worldPos;
 		checkMyExit = true;
+		// GeneralsX @bugfix OpenAI 02/08/2026 Keep simulation calculations deterministic and safe across platforms.
 		Real c = (Real)WWMath::CosTrig(angle);
 		Real s = (Real)WWMath::SinTrig(angle);
 		Real offset = build->getTemplateGeometryInfo().getMajorRadius() + myFactoryExitWidth/2.0f;

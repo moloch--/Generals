@@ -922,6 +922,7 @@ void Path::computePointOnPath(
 		// compute distance of point from this path segment
 		Real toDistSqr = sqr(toPos.x) + sqr(toPos.y);
 		Real offsetDistSq = toDistSqr - sqr(alongPathDist);
+		// GeneralsX @bugfix OpenAI 02/08/2026 Keep simulation calculations deterministic and safe across platforms.
 		Real offsetDist = (offsetDistSq <= 0.0) ? 0.0 : WWMath::SqrtOrigin(offsetDistSq);
 
 		// If we are basically on the path, return the next path node as the movement goal.

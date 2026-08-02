@@ -95,6 +95,7 @@ Bool SupplyWarehouseDockUpdate::action( Object* docker, Object *drone )
 	Real closeEnoughSqr = sqr(docker->getGeometryInfo().getBoundingCircleRadius()*2);
 	Real curDistSqr = ThePartitionManager->getDistanceSquared(docker, getObject(), FROM_BOUNDINGSPHERE_2D);
 	if (curDistSqr > closeEnoughSqr) {
+		// GeneralsX @bugfix OpenAI 02/08/2026 Keep simulation calculations deterministic and safe across platforms.
 		DEBUG_LOG(("Failing dock, dist %f, not close enough(%f).", WWMath::SqrtOrigin(curDistSqr), WWMath::SqrtOrigin(closeEnoughSqr)));
 		// Make it twitch a little.
 		Coord3D newPos = *docker->getPosition();

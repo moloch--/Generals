@@ -653,6 +653,7 @@ Object *AIPlayer::buildStructureWithDozer(const ThingTemplate *bldgPlan, BuildLi
 		dx = dozer->getPosition()->x - pos.x;
 		dy = dozer->getPosition()->y - pos.y;
 
+		// GeneralsX @bugfix OpenAI 02/08/2026 Keep simulation calculations deterministic and safe across platforms.
 		Int count = WWMath::SqrtOrigin(dx*dx+dy*dy)/(PATHFIND_CELL_SIZE_F/2);
 		if (count<2) count = 2;
 		Int i;

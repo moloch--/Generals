@@ -2272,6 +2272,7 @@ UpdateSleepTime AIUpdateInterface::doLocomotor()
 							}
 							else
 							{
+								// GeneralsX @bugfix OpenAI 02/08/2026 Keep simulation calculations deterministic and safe across platforms.
 								Real dist = WWMath::SqrtfOrigin(dSqr);
 								if (dist<1) dist = 1;
 								pos.x += 2*PATHFIND_CELL_SIZE_F*dx/(dist*LOGICFRAMES_PER_SECOND);

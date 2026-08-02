@@ -291,7 +291,8 @@ bool IsOnlineGameCompatible(
 	const OnlineGameCompatibility &local,
 	const OnlineGameCompatibility &remote)
 {
-	return !local.product.empty() && local.product == remote.product && local.version == remote.version &&
+	return local.version > 0 && !local.product.empty() && local.product == remote.product &&
+		local.version == remote.version &&
 		local.iniCRC == remote.iniCRC;
 }
 

@@ -512,6 +512,7 @@ UpdateSleepTime NeutronMissileUpdate::update()
 	if (m_noTurnDistLeft > 0.0f && oldPosValid)
 	{
 		Coord3D newPos = *getObject()->getPosition();
+		// GeneralsX @bugfix OpenAI 02/08/2026 Keep simulation calculations deterministic and safe across platforms.
 		Real distThisTurn = WWMath::SqrtOrigin(sqr(newPos.x-oldPos.x) + sqr(newPos.y-oldPos.y) + sqr(newPos.z-oldPos.z));
 		//DEBUG_LOG(("noTurnDist goes from %f to %f",m_noTurnDistLeft,m_noTurnDistLeft-distThisTurn));
 		m_noTurnDistLeft -= distThisTurn;

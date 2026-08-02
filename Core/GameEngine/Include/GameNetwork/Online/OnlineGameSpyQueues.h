@@ -66,11 +66,15 @@ private:
 	std::string m_lastStatusString;
 };
 
-// GeneralsX @bugfix OpenAI 02/08/2026 Keep the launched relay alive when the retail UI leaves its staging room.
+// GeneralsX @bugfix OpenAI 02/08/2026 Preserve relay state only for an explicitly successful launch detach.
 template<typename ClearGameState, typename SendLeave>
-void ApplyOnlineStagingRoomExit(bool gameStarted, ClearGameState clearGameState, SendLeave sendLeave)
+void ApplyOnlineStagingRoomExit(
+	bool gameStarted,
+	bool gameLaunchCommitted,
+	ClearGameState clearGameState,
+	SendLeave sendLeave)
 {
-	if (gameStarted)
+	if (gameStarted && gameLaunchCommitted)
 		return;
 	clearGameState();
 	sendLeave();

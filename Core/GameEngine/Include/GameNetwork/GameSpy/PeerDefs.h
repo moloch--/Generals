@@ -213,7 +213,8 @@ public:
 	virtual void updateStagingRoom( GameSpyStagingRoom room ) = 0;
 	virtual void removeStagingRoom( GameSpyStagingRoom room ) = 0;
 	virtual Bool hasStagingRoomListChanged() = 0;
-	virtual void leaveStagingRoom() = 0;
+	// GeneralsX @bugfix OpenAI 02/08/2026 Tell the Online backend when staging is detached after a successful launch.
+	virtual void leaveStagingRoom(Bool gameLaunchCommitted = FALSE) = 0;
 	virtual void markAsStagingRoomHost() = 0;
 	virtual void markAsStagingRoomJoiner( Int game ) = 0;
 	virtual void sawFullGameList() = 0;

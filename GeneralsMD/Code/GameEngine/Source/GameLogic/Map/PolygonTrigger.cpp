@@ -286,6 +286,7 @@ void PolygonTrigger::updateBounds()	const
 	Real halfWidth = (m_bounds.hi.x - m_bounds.lo.x) / 2.0f;
 	Real halfHeight = (m_bounds.hi.y + m_bounds.lo.y) / 2.0f;
 
+	// GeneralsX @bugfix OpenAI 02/08/2026 Keep simulation calculations deterministic and safe across platforms.
 	m_radius = WWMath::SqrtOrigin(halfHeight*halfHeight + halfWidth*halfWidth);
 }
 

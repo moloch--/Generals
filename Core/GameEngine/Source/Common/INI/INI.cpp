@@ -1870,6 +1870,7 @@ void INI::parseDurationReal( INI *ini, void * /*instance*/, void *store, const v
 void INI::parseDurationUnsignedInt( INI *ini, void * /*instance*/, void *store, const void* /*userData*/ )
 {
 	UnsignedInt val = scanUnsignedInt(ini->getNextToken());
+	// GeneralsX @bugfix OpenAI 02/08/2026 Keep simulation calculations deterministic and safe across platforms.
 	*(UnsignedInt *)store = (UnsignedInt)WWMath::Ceil(ConvertDurationFromMsecsToFrames((Real)val));
 }
 

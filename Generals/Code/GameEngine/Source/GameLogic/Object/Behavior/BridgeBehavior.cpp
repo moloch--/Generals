@@ -1115,6 +1115,7 @@ void BridgeBehavior::createScaffolding()
 	// to the center area of the bridge
 	//
 	Real tileDistance = leftVector.length();
+	// GeneralsX @bugfix OpenAI 02/08/2026 Keep simulation calculations deterministic and safe across platforms.
 	Int numObjects = REAL_TO_INT_CEIL( WWMath::Div_FixNaN(tileDistance, spacing, 0.0f) ) + 1;
 
 	//

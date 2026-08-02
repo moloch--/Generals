@@ -116,11 +116,12 @@ void BezierSegment::evaluateBezSegmentAtT(Real tValue, Coord3D *outResult) const
 	D3DXVECTOR4 zCoords(m_controlPoints[0].z, m_controlPoints[1].z, m_controlPoints[2].z, m_controlPoints[3].z);
 
 	D3DXVECTOR4 tResult;
-	BezierMath::D3DXVec4Transform(&tResult, &tVec, &BezierSegment::s_bezBasisMatrix);
+	// GeneralsX @bugfix OpenAI 02/08/2026 Keep Bezier transforms deterministic across GLM and legacy backends.
+	BezierMath::Vec4Transform(&tResult, &tVec, &BezierSegment::s_bezBasisMatrix);
 
-	outResult->x = BezierMath::D3DXVec4Dot(&xCoords, &tResult);
-	outResult->y = BezierMath::D3DXVec4Dot(&yCoords, &tResult);
-	outResult->z = BezierMath::D3DXVec4Dot(&zCoords, &tResult);
+	outResult->x = BezierMath::Vec4Dot(&xCoords, &tResult);
+	outResult->y = BezierMath::Vec4Dot(&yCoords, &tResult);
+	outResult->z = BezierMath::Vec4Dot(&zCoords, &tResult);
 #else // SAGE_USE_GLM
 	glm::vec4 tVec(tValue * tValue * tValue, tValue * tValue, tValue, 1);
 
@@ -128,11 +129,12 @@ void BezierSegment::evaluateBezSegmentAtT(Real tValue, Coord3D *outResult) const
 	glm::vec4 yCoords(m_controlPoints[0].y, m_controlPoints[1].y, m_controlPoints[2].y, m_controlPoints[3].y);
 	glm::vec4 zCoords(m_controlPoints[0].z, m_controlPoints[1].z, m_controlPoints[2].z, m_controlPoints[3].z);
 
-	glm::vec4 tResult = BezierSegment::s_bezBasisMatrix * tVec;
+	glm::vec4 tResult;
+	BezierMath::Vec4Transform(&tResult, &tVec, &BezierSegment::s_bezBasisMatrix);
 
-	outResult->x = glm::dot(xCoords, tResult);
-	outResult->y = glm::dot(yCoords, tResult);
-	outResult->z = glm::dot(zCoords, tResult);
+	outResult->x = BezierMath::Vec4Dot(&xCoords, &tResult);
+	outResult->y = BezierMath::Vec4Dot(&yCoords, &tResult);
+	outResult->z = BezierMath::Vec4Dot(&zCoords, &tResult);
 #endif
 }
 

@@ -136,6 +136,7 @@ UpdateSleepTime DynamicGeometryInfoUpdate::update()
 	Object *me = getObject();
 	Real newHeight, newMajor, newMinor;
 
+	// GeneralsX @bugfix OpenAI 02/08/2026 Keep simulation calculations deterministic and safe across platforms.
 	Real ratio = 1.0f;
 	if (data->m_transitionTime > 0)
 	{

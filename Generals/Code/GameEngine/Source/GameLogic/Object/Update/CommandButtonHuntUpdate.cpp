@@ -290,6 +290,7 @@ Object* CommandButtonHuntUpdate::scanClosestTarget()
 					}
 				}
 				Real distSqr = ThePartitionManager->getDistanceSquared(me, other, FROM_BOUNDINGSPHERE_2D);
+				// GeneralsX @bugfix OpenAI 02/08/2026 Keep simulation calculations deterministic and safe across platforms.
 				Real dist = WWMath::SqrtOrigin(distSqr);
 				Int curPriority = data->m_scanRange - dist;
 				if (info) curPriority = info->getPriority(other->getTemplate());

@@ -1433,6 +1433,7 @@ void Drawable::calcPhysicsXformHoverOrWings( const Locomotor *locomotor, Physics
 			const Real TINY_DZ = 0.001f;
 			if (fabs(vel->z) > TINY_DZ)
 			{
+				// GeneralsX @bugfix OpenAI 02/08/2026 Keep simulation calculations deterministic and safe across platforms.
 				Real pitch = WWMath::Atan2Origin(vel->z, WWMath::SqrtOrigin(sqr(vel->x)+sqr(vel->y)));
 				m_locoInfo->m_pitch -= Z_VEL_PITCH_COEFF * pitch;
 			}

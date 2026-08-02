@@ -1466,6 +1466,7 @@ void makeAlignToNormalMatrix( Real angle, const Coord3D& pos, const Coord3D& nor
 
 	z = normal;
 
+	// GeneralsX @bugfix OpenAI 02/08/2026 Keep simulation calculations deterministic and safe across platforms.
 	/*
 		It is extremely important that the resulting matrix is such that
 		the xvector points in the angle we specified; specifically,

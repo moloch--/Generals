@@ -78,6 +78,7 @@ class TPoint2D {
 		TPoint2D<T> const operator - () const {return(TPoint2D<T>(-X, -Y));}
 
 		// Vector support functions.
+		// GeneralsX @bugfix OpenAI 02/08/2026 Keep simulation calculations deterministic and safe across platforms.
 		T Length() const {return(T(WWMath::SqrtOrigin(static_cast<double>(X*X + Y*Y))));}
 		TPoint2D<T> const Normalize() const {
 			double len = WWMath::SqrtOrigin(static_cast<double>(X*X + Y*Y));

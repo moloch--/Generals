@@ -709,6 +709,7 @@ Object *AI::findClosestEnemy( const Object *me, Real range, UnsignedInt qualifie
 		}
 
 		Real distSqr = ThePartitionManager->getDistanceSquared(me, theEnemy, FROM_BOUNDINGSPHERE_2D);
+		// GeneralsX @bugfix OpenAI 02/08/2026 Keep simulation calculations deterministic and safe across platforms.
 		Real dist = WWMath::SqrtOrigin(distSqr);
 		Int modifier = (Int)WWMath::Div_FixNaN(dist, getAiData()->m_attackPriorityDistanceModifier, 0.0f);
 		Int modPriority = curPriority-modifier;

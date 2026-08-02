@@ -170,7 +170,7 @@ static WWINLINE float SinTrig(float x)
 #ifdef USE_DETERMINISTIC_MATH
 	return gm_sinf(x);
 #else
-	return sinf(x);
+	return Sin(x);
 #endif
 }
 
@@ -179,7 +179,7 @@ static WWINLINE float CosTrig(float x)
 #ifdef USE_DETERMINISTIC_MATH
 	return gm_cosf(x);
 #else
-	return cosf(x);
+	return Cos(x);
 #endif
 }
 
@@ -197,7 +197,7 @@ static WWINLINE float ACosTrig(float x)
 #ifdef USE_DETERMINISTIC_MATH
 	return gm_acosf(x);
 #else
-	return acosf(x);
+	return Acos(x);
 #endif
 }
 
@@ -206,20 +206,20 @@ static WWINLINE float ASinTrig(float x)
 #ifdef USE_DETERMINISTIC_MATH
 	return gm_asinf(x);
 #else
-	return asinf(x);
+	return Asin(x);
 #endif
 }
 
+// GeneralsX @bugfix OpenAI 02/08/2026 Preserve double-width inputs in deterministic math wrappers.
 // Origin wrappers replace bare CRT calls in simulation code while preserving
-// overload selection. GameMath provides float-width functions, matching the
-// engine's simulation values and avoiding extended-precision x87 differences.
+// overload selection and operand width.
 #if defined(USE_DETERMINISTIC_MATH)
-static WWINLINE double SqrtOrigin(double x) { return static_cast<double>(gm_sqrtf(static_cast<float>(x))); }
+static WWINLINE double SqrtOrigin(double x) { return gm_sqrt(x); }
 static WWINLINE float SqrtOrigin(float x) { return gm_sqrtf(x); }
 static WWINLINE float SqrtfOrigin(float x) { return gm_sqrtf(x); }
-static WWINLINE double Atan2Origin(double y, double x) { return static_cast<double>(gm_atan2f(static_cast<float>(y), static_cast<float>(x))); }
+static WWINLINE double Atan2Origin(double y, double x) { return gm_atan2(y, x); }
 static WWINLINE float Atan2Origin(float y, float x) { return gm_atan2f(y, x); }
-static WWINLINE double PowOrigin(double x, double y) { return static_cast<double>(gm_powf(static_cast<float>(x), static_cast<float>(y))); }
+static WWINLINE double PowOrigin(double x, double y) { return gm_pow(x, y); }
 static WWINLINE float PowOrigin(float x, float y) { return gm_powf(x, y); }
 #else
 static WWINLINE double SqrtOrigin(double x) { return sqrt(x); }
@@ -230,6 +230,16 @@ static WWINLINE float Atan2Origin(float y, float x) { return atan2f(y, x); }
 static WWINLINE double PowOrigin(double x, double y) { return pow(x, y); }
 static WWINLINE float PowOrigin(float x, float y) { return powf(x, y); }
 #endif
+
+// GeneralsX @bugfix OpenAI 02/08/2026 Pin the four-term reduction tree used by both Bezier backends.
+static WWINLINE float Pairwise_Multiply_Add_4(
+	float a0, float b0, float a1, float b1,
+	float a2, float b2, float a3, float b3)
+{
+	const float sum01 = a0 * b0 + a1 * b1;
+	const float sum23 = a2 * b2 + a3 * b3;
+	return sum01 + sum23;
+}
 static WWINLINE float		Sign(float val);
 #if defined(USE_DETERMINISTIC_MATH)
 static WWINLINE float		Ceil(float val) { return gm_ceilf(val); }
@@ -831,8 +841,7 @@ WWINLINE float WWMath::Div_FixNaN(float dividend, float divisor, float fallback)
 WWINLINE double WWMath::Div_FixNaN(double dividend, double divisor, double fallback)
 {
 #if defined(USE_DETERMINISTIC_MATH)
-	return static_cast<double>(divisor == 0.0 ? static_cast<float>(fallback) :
-		static_cast<float>(dividend) / static_cast<float>(divisor));
+	return divisor == 0.0 ? fallback : dividend / divisor;
 #else
 	return dividend / divisor;
 #endif

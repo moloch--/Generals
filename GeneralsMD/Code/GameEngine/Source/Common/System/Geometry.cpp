@@ -173,6 +173,7 @@ void GeometryInfo::calcPitches(const Coord3D& thisPos, const GeometryInfo& that,
 	Coord3D thisCenter;
 	getCenterPosition(thisPos, thisCenter);
 
+	// GeneralsX @bugfix OpenAI 02/08/2026 Keep simulation calculations deterministic and safe across platforms.
 	Real dxy = WWMath::SqrtOrigin(sqr(thatPos.x - thisCenter.x) + sqr(thatPos.y - thisCenter.y));
 
 	Real dz;

@@ -343,8 +343,9 @@ Real DeliverPayloadAIUpdate::calcMinTurnRadius(Real* timeToTravelThatDist) const
 
 		so we just eliminate the middleman:
 	*/
-	// determine required turn radius based on our current speed and max turn rate
-	Real minTurnRadius = WWMath::Div_FixNaN(maxSpeed, maxTurnRate, 999999.0f);
+	// GeneralsX @bugfix OpenAI 02/08/2026 Preserve the fallback for zero or negative turn rates.
+	Real minTurnRadius = maxTurnRate > 0.0f ?
+		WWMath::Div_FixNaN(maxSpeed, maxTurnRate, 999999.0f) : 999999.0f;
 
 	if (timeToTravelThatDist)
 		*timeToTravelThatDist = WWMath::Div_FixNaN(minTurnRadius, maxSpeed, 999999.0f);

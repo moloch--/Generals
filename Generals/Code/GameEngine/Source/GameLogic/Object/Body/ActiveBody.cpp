@@ -661,6 +661,7 @@ void ActiveBody::setMaxHealth( Real maxHealth, MaxHealthChangeType healthChangeT
 		{
 			//400/500 (80%) + 100 becomes 480/600 (80%)
 			//200/500 (40%) - 100 becomes 160/400 (40%)
+			// GeneralsX @bugfix OpenAI 02/08/2026 Keep simulation calculations deterministic and safe across platforms.
 			Real ratio = WWMath::Div_FixNaN(m_currentHealth, prevMaxHealth, 1.0f);
 			Real newHealth = maxHealth * ratio;
 			internalChangeHealth( newHealth - m_currentHealth );

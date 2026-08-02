@@ -218,6 +218,7 @@ Bool SpectreGunshipDeploymentUpdate::initiateIntentToDoSpecialPower(const Specia
     newGunship->setPosition( &creationCoord );
 
     //ORIENTATION
+		// GeneralsX @bugfix OpenAI 02/08/2026 Keep simulation calculations deterministic and safe across platforms.
 		Real orient = WWMath::Atan2Origin( m_initialTargetPosition.y - creationCoord.y, m_initialTargetPosition.x - creationCoord.x);
     newGunship->setOrientation( orient );
 

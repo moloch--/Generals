@@ -166,6 +166,7 @@ void DynamicShroudClearingRangeUpdate::animateGridDecals()
 
 	for (int d = 0; d < GRID_FX_DECAL_COUNT; ++d)
 	{
+		// GeneralsX @bugfix OpenAI 02/08/2026 Keep simulation calculations deterministic and safe across platforms.
 		pos.x = ctr->x + (WWMath::Sin(angle) * radius);
 		pos.y = ctr->y + (WWMath::Cos(angle) * radius);
 

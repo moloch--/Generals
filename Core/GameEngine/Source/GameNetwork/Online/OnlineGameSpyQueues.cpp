@@ -696,6 +696,8 @@ void OnlineServiceSession::resetStateLocked()
 void OnlineServiceSession::clearGameStateLocked()
 {
 	ClearOnlineSession();
+	// GeneralsX @bugfix OpenAI 02/08/2026 Let the next presence update recover cleanly after any launch abort or game end.
+	m_buddyStatusPolicy.reset();
 	m_currentGame = ServiceGame{};
 	m_hasCurrentGame = false;
 	m_startedRoster.clear();
@@ -2175,6 +2177,7 @@ void OnlineServiceSession::handle(const PeerRequest &request)
 		case PeerRequest::PEERREQUEST_LEAVESTAGINGROOM:
 			ApplyOnlineStagingRoomExit(
 				m_gameStarted,
+				request.stagingRoom.gameLaunchCommitted,
 				[this]() { clearGameStateLocked(); },
 				[this]() { sendRequestLocked("game.leave", Json::object()); });
 			break;

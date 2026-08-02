@@ -14,7 +14,7 @@ on:
       preset:
         required: false
         type: string
-        default: "windows64-deploy"
+        default: "win32-vcpkg"
         description: "CMake preset for Windows"
   workflow_dispatch:
     inputs:
@@ -29,22 +29,26 @@ on:
         type: choice
         description: "CMake preset for Windows"
         options:
-          - windows64-deploy
-        default: windows64-deploy
+          - win32-vcpkg
+        default: win32-vcpkg
 
 jobs:
   build-windows:
-    name: ${{ inputs.game }}@${{ inputs.preset }}
+    name: Windows SFX launcher validation
     runs-on: windows-latest
-    timeout-minutes: 5
+    timeout-minutes: 20
 
     steps:
-      - name: Not Yet Implemented
-        shell: bash
-        run: |
-          echo "Windows build (SDL3 + DXVK + OpenAL 64-bit) is not yet implemented."
-          echo "See docs/WORKDIR/phases/ for the Windows roadmap."
-          echo ""
-          echo "To run the real build, switch to the branch that has Windows support"
-          echo "and re-run this workflow from that branch."
-          exit 0
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: scripts/tooling/sfx/go.mod
+          cache-dependency-path: scripts/tooling/sfx/go.sum
+
+      # GeneralsX @test OpenAI 02/08/2026 Exercise Windows file syncing and a real packed launcher.
+      - name: Test Windows SFX launcher
+        working-directory: scripts/tooling/sfx
+        run: go test -count=1 ./...

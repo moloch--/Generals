@@ -3572,6 +3572,7 @@ StateReturnType AIAttackMoveToState::update()
 		if (distSqr < sqr(ATTACK_CLOSE_ENOUGH_CELLS*PATHFIND_CELL_SIZE_F)) {
 			return ret;
 		}
+		// GeneralsX @bugfix OpenAI 02/08/2026 Keep simulation calculations deterministic and safe across platforms.
 		DEBUG_LOG(("AIAttackMoveToState::update Distance from goal %f, retrying.", WWMath::SqrtOrigin(distSqr)));
 
 		ret = STATE_CONTINUE;

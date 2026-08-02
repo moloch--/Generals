@@ -193,8 +193,8 @@ inline SphereClass::SphereClass(const Vector3 *Position,const int VertCount)
 	dz = dia2.Z - center.Z;
 
 	double radsqr = dx*dx + dy*dy + dz*dz;
-	// GeneralsX @bugfix Mr. Meeseeks 17/07/2026 Use deterministic WWMath::Sqrt instead of raw sqrt
-	double radius = WWMath::Sqrt(radsqr);
+	// GeneralsX @bugfix OpenAI 02/08/2026 Preserve the original double-width bounding-sphere sqrt.
+	double radius = WWMath::SqrtOrigin(radsqr);
 
 
 	// SECOND PASS:
@@ -211,7 +211,7 @@ inline SphereClass::SphereClass(const Vector3 *Position,const int VertCount)
 
 			// this point was outside the old sphere, compute a new
 			// center point and radius which contains this point
-			double testrad = WWMath::Sqrt(testrad2);
+			double testrad = WWMath::SqrtOrigin(testrad2);
 
 			// adjust center and radius
 			radius = (radius + testrad) / 2.0;

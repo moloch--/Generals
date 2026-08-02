@@ -627,6 +627,7 @@ void AISkirmishPlayer::buildAIBaseDefenseStructure(const AsciiString &thingName,
 
 		Real structureRadius = tTemplate->getTemplateGeometryInfo().getBoundingCircleRadius();
 		Real baseCircumference = 2*PI*m_baseRadius;
+		// GeneralsX @bugfix OpenAI 02/08/2026 Keep simulation calculations deterministic and safe across platforms.
 		Real angleOffset = 2*PI*WWMath::Div_FixNaN(structureRadius*4, baseCircumference, 0.0f);
 
 		Int selector;

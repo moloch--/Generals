@@ -99,6 +99,7 @@ void initTrig()
 	fprintf(fp, "static Int sinLookup[TRIG_RES] = {\n");
 	for( i=0; i<TRIG_RES; i++ ) {
 		angle = TWOPI * i / (Real)TRIG_RES;
+		// GeneralsX @bugfix OpenAI 02/08/2026 Keep simulation calculations deterministic and safe across platforms.
 		sinLookup[i] = (Int)(WWMath::SinTrig(angle) * INT_ONE);
 
 		if (i == 0)

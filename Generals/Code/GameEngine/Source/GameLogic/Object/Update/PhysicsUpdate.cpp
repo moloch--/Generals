@@ -94,6 +94,7 @@ static Real heightToSpeed(Real height)
 {
 	// don't bother trying to remember how far we've fallen; instead,
 	// back-calc it from our speed & gravity... v = WWMath::SqrtOrigin(2*g*h)
+	// GeneralsX @bugfix OpenAI 02/08/2026 Keep simulation calculations deterministic and safe across platforms.
 	return WWMath::SqrtOrigin(fabs(2.0f * TheGlobalData->m_gravity * height));
 }
 

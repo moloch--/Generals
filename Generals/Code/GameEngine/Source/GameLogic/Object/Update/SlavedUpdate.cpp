@@ -191,6 +191,7 @@ UpdateSleepTime SlavedUpdate::update()
 	if( data->m_repairRatePerSecond > 0.0f )
 	{
 		BodyModuleInterface *body = master->getBodyModule();
+		// GeneralsX @bugfix OpenAI 02/08/2026 Keep simulation calculations deterministic and safe across platforms.
 		if (body)
 		{
 			Real health = body->getHealth();

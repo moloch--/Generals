@@ -340,6 +340,7 @@ void TestStagingRoomExitLifecycle()
 	configureRelaySession();
 	GeneralsOnline::ApplyOnlineStagingRoomExit(
 		false,
+		false,
 		[&]() {
 			++clearCount;
 			GeneralsOnline::ClearOnlineSession();
@@ -350,10 +351,28 @@ void TestStagingRoomExitLifecycle()
 	Expect(!GeneralsOnline::GetOnlineSessionSnapshot().ready,
 		"pre-launch staging exit retained the relay session");
 
+	// Both transport initialization and map-transfer failures follow this one ordinary-leave path after game.go.
 	clearCount = 0;
 	leaveCount = 0;
 	configureRelaySession();
 	GeneralsOnline::ApplyOnlineStagingRoomExit(
+		true,
+		false,
+		[&]() {
+			++clearCount;
+			GeneralsOnline::ClearOnlineSession();
+		},
+		[&]() { ++leaveCount; });
+	Expect(clearCount == 1 && leaveCount == 1,
+		"game.go launch failure did not clear the relay and send exactly one game.leave");
+	Expect(!GeneralsOnline::GetOnlineSessionSnapshot().ready,
+		"game.go launch failure retained the relay session");
+
+	clearCount = 0;
+	leaveCount = 0;
+	configureRelaySession();
+	GeneralsOnline::ApplyOnlineStagingRoomExit(
+		true,
 		true,
 		[&]() {
 			++clearCount;
@@ -369,7 +388,7 @@ void TestStagingRoomExitLifecycle()
 	GeneralsOnline::ClearOnlineSession();
 }
 
-// GeneralsX @test OpenAI 02/08/2026 Suppress only Loading-to-Online teardown and preserve accepted status history.
+// GeneralsX @test OpenAI 02/08/2026 Reset Loading suppression when explicit abort cleanup clears game state.
 void TestBuddyLoadingStatusLifecycle()
 {
 	using GeneralsOnline::OnlineBuddyStatusKind;
@@ -386,20 +405,25 @@ void TestBuddyLoadingStatusLifecycle()
 		"suppressed Loading-to-Online transition still applied status or game.end side effects");
 	Expect(policy.lastStatus() == OnlineBuddyStatusKind::Playing && policy.lastStatusString() == "Loading",
 		"suppressed Loading-to-Online transition changed the prior accepted state");
-	Expect(!policy.apply(OnlineBuddyStatusKind::Online, "", [&]() {
-		++appliedStatuses;
-		++endRequests;
-	}), "Loading-to-Online suppression incorrectly depended on the incoming status text");
-	Expect(appliedStatuses == 1 && endRequests == 0 && policy.lastStatusString() == "Loading",
-		"a text variant of the suppressed Online transition applied side effects or changed history");
 
+	policy.reset();
+	Expect(policy.apply(OnlineBuddyStatusKind::Online, "", [&]() {
+		++appliedStatuses;
+	}), "Online presence remained suppressed after explicit launch-abort cleanup");
+	Expect(appliedStatuses == 2 && endRequests == 0 && policy.lastStatusString().empty(),
+		"launch-abort cleanup did not reset presence suppression");
+
+	Expect(policy.apply(OnlineBuddyStatusKind::Playing, "Loading", [&]() { ++appliedStatuses; }),
+		"a later Loading presence was not accepted");
+	Expect(!policy.apply(OnlineBuddyStatusKind::Online, "Online", [&]() { ++appliedStatuses; }),
+		"normal post-launch Loading teardown was not suppressed");
 	Expect(policy.apply(OnlineBuddyStatusKind::Playing, "Playing", [&]() { ++appliedStatuses; }),
 		"Playing presence was not accepted after loading");
 	Expect(policy.apply(OnlineBuddyStatusKind::Online, "Online", [&]() {
 		++appliedStatuses;
 		++endRequests;
 	}), "normal Playing-to-Online completion was suppressed");
-	Expect(appliedStatuses == 3 && endRequests == 1,
+	Expect(appliedStatuses == 5 && endRequests == 1,
 		"normal Playing-to-Online completion did not apply game-end side effects exactly once");
 	Expect(policy.lastStatus() == OnlineBuddyStatusKind::Online && policy.lastStatusString() == "Online",
 		"normal Playing-to-Online completion did not update the accepted state");
@@ -407,19 +431,24 @@ void TestBuddyLoadingStatusLifecycle()
 
 void TestGameCompatibility()
 {
-#if !defined(USE_DETERMINISTIC_MATH)
-#error "Online endpoint tests for compatibility generation two require deterministic math"
-#endif
+#if defined(USE_DETERMINISTIC_MATH)
 	static_assert(GeneralsOnline::kOnlineCompatibilityVersion == 2,
 		"cross-platform deterministic clients require compatibility generation two");
+	constexpr bool compatibleBuild = true;
+#else
+	static_assert(GeneralsOnline::kOnlineCompatibilityVersion == 0,
+		"non-deterministic clients must fail closed before Online gameplay");
+	constexpr bool compatibleBuild = false;
+#endif
 	const GeneralsOnline::OnlineGameCompatibility local{
 		"zerohour", GeneralsOnline::kOnlineCompatibilityVersion, UINT32_C(0x12345678)};
 	const GeneralsOnline::OnlineGameCompatibility same{
 		"zerohour", GeneralsOnline::kOnlineCompatibilityVersion, UINT32_C(0x12345678)};
-	Expect(GeneralsOnline::IsOnlineGameCompatible(local, same),
-		"an exact generation-two Online compatibility tuple was rejected");
-	Expect(GeneralsOnline::ProjectOnlineExeCRC(UINT32_C(0x13579bdf), local, same) == UINT32_C(0x13579bdf),
-		"an exact compatibility tuple did not retain the local EXE CRC");
+	Expect(GeneralsOnline::IsOnlineGameCompatible(local, same) == compatibleBuild,
+		"the build's Online compatibility eligibility was projected incorrectly");
+	const std::uint32_t expectedSameCRC = compatibleBuild ? UINT32_C(0x13579bdf) : UINT32_C(0xeca86420);
+	Expect(GeneralsOnline::ProjectOnlineExeCRC(UINT32_C(0x13579bdf), local, same) == expectedSameCRC,
+		"the build's Online compatibility marker projected the wrong EXE CRC");
 
 	auto mismatch = same;
 	mismatch.product = "generals";

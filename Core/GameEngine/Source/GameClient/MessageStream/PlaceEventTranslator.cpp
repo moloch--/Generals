@@ -339,6 +339,7 @@ GameMessageDisposition PlaceEventTranslator::translateGameMessage(const GameMess
 				Int x, y;
 				x = mouse.x - start.x;
 				y = mouse.y - start.y;
+				// GeneralsX @bugfix OpenAI 02/08/2026 Keep simulation calculations deterministic and safe across platforms.
 				if( WWMath::SqrtOrigin( static_cast<float>((x * x) + (y * y)) ) >= PLACEMENT_DRAG_THRESHOLD_DIST )
 				{
 

@@ -232,6 +232,7 @@ static void calcDirectionToApplyThrust(
 
 	Bool foundSolution = false;
 	Real distToGoalSqr = vecToGoal.Length2();
+	// GeneralsX @bugfix OpenAI 02/08/2026 Keep simulation calculations deterministic and safe across platforms.
 	Real distToGoal = WWMath::SqrtOrigin(distToGoalSqr);
 	Real curVelMagSqr = curVel.Length2();
 	Real curVelMag = WWMath::SqrtOrigin(curVelMagSqr);

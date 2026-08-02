@@ -262,6 +262,7 @@ Real OCLUpdate::getCountdownPercent() const
 {
 	UnsignedInt now = TheGameLogic->getFrame();
 
+	// GeneralsX @bugfix OpenAI 02/08/2026 Keep simulation calculations deterministic and safe across platforms.
 	UnsignedInt totalTime = m_nextCreationFrame - m_timerStartedFrame;
 	if (totalTime > 0)
 	{

@@ -172,6 +172,7 @@ UpdateSleepTime CleanupHazardUpdate::update()
 		AIUpdateInterface *ai = obj->getAI();
 		if( ai && (ai->isIdle() || ai->isBusy()) )
 		{
+			// GeneralsX @bugfix OpenAI 02/08/2026 Keep simulation calculations deterministic and safe across platforms.
 			Real fDist = WWMath::SqrtOrigin( ThePartitionManager->getDistanceSquared( obj, &m_pos, FROM_CENTER_2D ) );
 			if( fDist < 25.0f )
 			{

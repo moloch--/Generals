@@ -501,11 +501,13 @@ GameSpyStagingRoom* GameSpyInfo::findStagingRoomByID( Int id )
 	return nullptr;
 }
 
-void GameSpyInfo::leaveStagingRoom()
+void GameSpyInfo::leaveStagingRoom(Bool gameLaunchCommitted)
 {
 	m_localStagingRoomID = 0;
 	PeerRequest req;
 	req.peerRequestType = PeerRequest::PEERREQUEST_LEAVESTAGINGROOM;
+	// GeneralsX @bugfix OpenAI 02/08/2026 Preserve relay state only for a launch that reached the gameplay handoff.
+	req.stagingRoom.gameLaunchCommitted = gameLaunchCommitted;
 	TheGameSpyPeerMessageQueue->addRequest(req);
 	m_playerInfoMap.clear();
 	m_joinedStagingRoom = FALSE;

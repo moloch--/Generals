@@ -610,13 +610,13 @@ void GameSpyStagingRoom::startGame(Int gameID)
 	// GeneralsX @feature OpenAI 01/08/2026 A configured Online match already has an authenticated relay path; never enter legacy NAT negotiation.
 	if (useOnlineRelay)
 	{
-		launchGame();
+		if (launchGame() && TheGameSpyInfo)
+			TheGameSpyInfo->leaveStagingRoom(TRUE);
 	}
 	else if (numHumans < 2)
 	{
-		launchGame();
-		if (TheGameSpyInfo)
-			TheGameSpyInfo->leaveStagingRoom();
+		if (launchGame() && TheGameSpyInfo)
+			TheGameSpyInfo->leaveStagingRoom(TRUE);
 	}
 	else
 //#endif // defined(RTS_DEBUG)
@@ -823,7 +823,7 @@ AsciiString GameSpyStagingRoom::generateLadderGameResultsPacket()
 	return results;
 }
 
-void GameSpyStagingRoom::launchGame()
+Bool GameSpyStagingRoom::launchGame()
 {
 	setGameInProgress(TRUE);
 
@@ -869,7 +869,7 @@ void GameSpyStagingRoom::launchGame()
 		GSMessageBoxOk(TheGameText->fetch("GUI:Error"), TheGameText->fetch("GUI:JoinFailedNoConnection"));
 		void PopBackToLobby();
 		PopBackToLobby();
-		return;
+		return FALSE;
 	}
 
 	TheNetwork->parseUserList(this);
@@ -894,7 +894,7 @@ void GameSpyStagingRoom::launchGame()
 
 		void PopBackToLobby();
 		PopBackToLobby();
-		return;
+		return FALSE;
 	}
 
 
@@ -925,6 +925,7 @@ void GameSpyStagingRoom::launchGame()
 
 	delete TheNAT;
 	TheNAT = nullptr;
+	return TRUE;
 }
 
 void GameSpyStagingRoom::reset()

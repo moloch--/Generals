@@ -3202,20 +3202,21 @@ Int PartitionManager::calcMinRadius(const ICoord2D& cur)
 		so it really shouldn't matter... (I hope)
 	*/
 
-	Real minDistSqr = 1e12f;
+	// GeneralsX @bugfix OpenAI 02/08/2026 Retain the original double precision before deterministic sqrt.
+	double minDistSqr = 1e12;
 	for (int i = 0; i < 4; ++i)
 	{
 		for (int j = 0; j < 4; ++j)
 		{
-			Real dx = centerPos[i].x - otherPos[j].x;
-			Real dy = centerPos[i].y - otherPos[j].y;
-			Real curDistSqr = dx*dx + dy*dy;
+			double dx = centerPos[i].x - otherPos[j].x;
+			double dy = centerPos[i].y - otherPos[j].y;
+			double curDistSqr = dx*dx + dy*dy;
 			if (minDistSqr > curDistSqr)
 				minDistSqr = curDistSqr;
 		}
 	}
 
-	Real dist = WWMath::SqrtfOrigin(minDistSqr);
+	double dist = WWMath::SqrtOrigin(minDistSqr);
 	Int minRadius = REAL_TO_INT_CEIL( dist / m_cellSize );
 
 	return minRadius;
@@ -3230,9 +3231,10 @@ void PartitionManager::calcRadiusVec()
 	Int cx = getCellCountX();
 	Int cy = getCellCountY();
 
-	Real dx = (Real)cx * (Real)cellSize;
-	Real dy = (Real)cy * (Real)cellSize;
-	Real maxPossibleDist = WWMath::SqrtfOrigin(dx*dx + dy*dy);
+	// GeneralsX @bugfix OpenAI 02/08/2026 Keep radius-vector bounds in double precision for stable cell counts.
+	double dx = (double)cx * (double)cellSize;
+	double dy = (double)cy * (double)cellSize;
+	double maxPossibleDist = WWMath::SqrtOrigin(dx*dx + dy*dy);
 
 	m_maxGcoRadius = REAL_TO_INT_CEIL(maxPossibleDist / cellSize);
 

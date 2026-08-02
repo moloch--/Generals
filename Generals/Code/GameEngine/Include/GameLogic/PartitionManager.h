@@ -1354,6 +1354,7 @@ public:
 	void getVectorTo(const Object *obj, const Object *otherObj, DistanceCalculationType dc, Coord3D& vec);
 	void getVectorTo(const Object *obj, const Coord3D *pos, DistanceCalculationType dc, Coord3D& vec);
 
+	// GeneralsX @bugfix OpenAI 02/08/2026 Keep distance-helper documentation aligned with deterministic WWMath.
 	// just like 'getDistance', but return the dist-sqr, meaning we save a WWMath::SqrtOrigin() call if you don't need it.
 	Real getDistanceSquared(const Object *obj, const Object *otherObj, DistanceCalculationType dc, Coord3D *vec = nullptr);
 	Real getDistanceSquared(const Object *obj, const Coord3D *pos, DistanceCalculationType dc, Coord3D *vec = nullptr);

@@ -185,6 +185,7 @@ void ToppleUpdate::applyTopplingForce( const Coord3D* toppleDirection, Real topp
 	// yeah, it assumes the models are constructed appropriately, but is a cheap way
 	// of minimizing the problem. (srj)
 	Real curAngleX = normalizeAngle(getObject()->getOrientation());
+	// GeneralsX @bugfix OpenAI 02/08/2026 Keep simulation calculations deterministic and safe across platforms.
 	Real toppleAngle = normalizeAngle(WWMath::Atan2Origin(m_toppleDirection.y, m_toppleDirection.x));
 	if (d->m_toppleLeftOrRightOnly)
 	{

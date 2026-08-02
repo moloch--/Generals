@@ -479,6 +479,7 @@ UpdateSleepTime ParticleUplinkCannonUpdate::update()
 				Real cxDistance = (factor * data->m_swathOfDeathDistance ) - (data->m_swathOfDeathDistance * 0.5f); //cx is cartesian x
 
 				//Now calculate the amplitude value.
+				// GeneralsX @bugfix OpenAI 02/08/2026 Keep simulation calculations deterministic and safe across platforms.
 				Real height = WWMath::SinTrig( radians );
 				Real cxHeight = height * data->m_swathOfDeathAmplitude;
 

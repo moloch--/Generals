@@ -320,6 +320,7 @@ void RailroadBehavior::onCollide( Object *other, const Coord3D *loc, const Coord
 		m_whistleSound.setPlayingHandle(TheAudio->addAudioEvent( &m_whistleSound ));
 
 
+	// GeneralsX @bugfix OpenAI 02/08/2026 Keep simulation calculations deterministic and safe across platforms.
 	Real dist = (Real)WWMath::SqrtfOrigin( dlt.x*dlt.x + dlt.y*dlt.y + dlt.z*dlt.z);
 	Real usRadius = obj->getGeometryInfo().getMajorRadius();
 	Real themRadius = other->getGeometryInfo().getMajorRadius();

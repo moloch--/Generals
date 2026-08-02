@@ -167,6 +167,7 @@ void PointDefenseLaserUpdate::fireWhenReady()
 		bonus.clear();
 		Real fireRange = data->m_weaponTemplate->getAttackRange( bonus );
 		Object *me = getObject();
+		// GeneralsX @bugfix OpenAI 02/08/2026 Keep simulation calculations deterministic and safe across platforms.
 		Real fDist = WWMath::SqrtOrigin( ThePartitionManager->getDistanceSquared( me, target, FROM_CENTER_2D ) );
 		if( fDist < fireRange )
 		{

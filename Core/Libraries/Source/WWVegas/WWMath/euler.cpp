@@ -174,14 +174,14 @@ double EulerAnglesClass::Get_Angle(int i)
  *=============================================================================================*/
 void EulerAnglesClass::From_Matrix(const Matrix3D & M, int order)
 {
-	// GeneralsX @bugfix Mr. Meeseeks 17/07/2026 Use deterministic WWMath::Sqrt instead of raw sqrt
+	// GeneralsX @bugfix OpenAI 02/08/2026 Preserve the original double-width Euler square root.
 	int i,j,k,h,n,s,f;
 
 	Order = order;
 	_euler_unpack_order(order,i,j,k,h,n,s,f);
 
 	if (s == EULER_REPEAT_YES) {
-		double sy = WWMath::Sqrt(M[i][j]*M[i][j] + M[i][k]*M[i][k]);
+		double sy = WWMath::SqrtOrigin(static_cast<double>(M[i][j]*M[i][j] + M[i][k]*M[i][k]));
 
 		if (sy > 16*FLT_EPSILON) {
 
@@ -198,7 +198,7 @@ void EulerAnglesClass::From_Matrix(const Matrix3D & M, int order)
 
 	} else {
 
-		double cy = WWMath::Sqrt(M[i][i]*M[i][i] + M[j][i]*M[j][i]);
+		double cy = WWMath::SqrtOrigin(static_cast<double>(M[i][i]*M[i][i] + M[j][i]*M[j][i]));
 
 		if (cy > 16*FLT_EPSILON) {
 
@@ -367,7 +367,6 @@ void _euler_unpack_order(int order,int &i,int &j,int &k,int &h,int &n,int &s,int
 	k = _euler_next[i+1-n];
 	h = (s ? k : i);
 }
-
 
 
 

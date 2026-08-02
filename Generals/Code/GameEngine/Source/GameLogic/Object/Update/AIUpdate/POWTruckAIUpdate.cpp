@@ -469,6 +469,7 @@ void POWTruckAIUpdate::updateCollectingTarget()
 
 	}
 
+// GeneralsX @bugfix OpenAI 02/08/2026 Keep simulation calculations deterministic and safe across platforms.
 /*
 	//
 	// when we're close to the target, we tell the target to start walking toward

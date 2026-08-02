@@ -169,6 +169,7 @@ static Bool calcTrajectory(
 	Real dz = end.z - start.z;
 
 	// calculating the angle is trivial.
+	// GeneralsX @bugfix OpenAI 02/08/2026 Keep simulation calculations deterministic and safe across platforms.
 	angle = WWMath::Atan2Origin(dy, dx);
 
 	// calculating the pitch requires a bit more effort.
