@@ -1113,7 +1113,12 @@ func removeEnvironment(environment []string, names ...string) []string {
 }
 
 func syncRegularFile(name string) error {
-	file, err := os.Open(name)
+	flags := os.O_RDONLY
+	if runtime.GOOS == "windows" {
+		// GeneralsX @bugfix Codex 02/08/2026 FlushFileBuffers requires a write-capable Windows handle.
+		flags = os.O_WRONLY
+	}
+	file, err := os.OpenFile(name, flags, 0)
 	if err != nil {
 		return err
 	}
