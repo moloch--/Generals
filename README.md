@@ -1,174 +1,401 @@
-# Command & Conquer Generals: Zero Hour — macOS, iOS & iPadOS
+# GeneralsX
 
-<img width="500" height="281" alt="IMG_3457_500" src="https://github.com/user-attachments/assets/aeaf6692-36e6-40c8-b9f8-8066d014ec4b" />
+![GeneralsX](assets/generalsx_splash.png)
 
-**Zero Hour running natively on Apple Silicon Macs, iPhone, and iPad** — campaign,
-skirmish, and Generals Challenge, with touch controls built for RTS (tap-select,
-drag-box, long-press deselect, two-finger scroll, pinch zoom). No emulation: this
-is the real 2003 engine compiled for ARM64, rendering DirectX 8 →
-[DXVK](https://github.com/doitsujin/dxvk) → Vulkan →
-[MoltenVK](https://github.com/KhronosGroup/MoltenVK) → Metal.
+GeneralsX is a modern, cross-platform build of the original *Command & Conquer:
+Generals* and *Zero Hour* engine. Zero Hour is the primary target. The active
+macOS client uses SDL3, DXVK, MoltenVK, OpenAL Soft, and FFmpeg; the native
+Windows client uses the original DirectX 8 renderer with a modern MSVC toolchain.
 
-Built on EA's GPL v3 source release, standing on a chain of community work —
-[TheSuperHackers](https://github.com/TheSuperHackers/GeneralsGameCode),
-[Fighter19's original Unix port](https://github.com/Fighter19/CnC_Generals_Zero_Hour), and
-[fbraz3/GeneralsX](https://github.com/fbraz3/GeneralsX) — this fork adds the iOS/iPadOS
-port and a set of engine fixes. See [Lineage & credits](#lineage--credits) for who built
-what. The original GeneralsX README lives on the `upstream-main` branch.
+The repository contains GPL-licensed engine source only. **No game data is
+included.** To run a build, provide the data files from a copy of Generals or
+Zero Hour that you legally own, such as the
+[Steam release](https://store.steampowered.com/app/2732960/).
 
-**No game assets are included or distributed.** You need your own copy
-([Steam](https://store.steampowered.com/app/2732960/), ~$5 on sale).
+## Platform status
 
-## What this port actually involved
+| Platform | Preset | Architecture | Status |
+|---|---|---:|---|
+| macOS | `macos-vulkan` | Apple Silicon (`arm64`) | Primary native desktop build |
+| Windows | `win32-vcpkg` | 32-bit x86 | Native build and focused Online paths validated; packaging and end-to-end gameplay remain exploratory |
+| Linux | `linux64-deploy` | 64-bit x86 | Active; see the [Linux build guide](docs/BUILD/LINUX.md) |
 
-"Porting" undersells how weird this journey was, so here's the honest shape of it.
-The lineage below built the foundation: EA's source release, the community's
-modernization, Fighter19's original Unix port, GeneralsX's macOS/Linux work.
-What did *not* exist was any of this on iOS — and iOS is a hostile place for a
-2003 Windows RTS:
+The macOS preset requests a macOS 15 deployment target. The actual minimum OS of
+a packaged build can be raised by Homebrew or Vulkan runtime libraries, so audit
+all bundled dylibs before distributing it as a macOS 15-compatible release.
 
-- **The engine assumes a writable filesystem wherever it lives.** iOS apps live in a
-  read-only, code-signed bundle. Every config write, cache, and save path had to be
-  rerouted — and the working directory bootstrapped from the bundle itself.
-- **The renderer speaks DirectX 8. The iPad speaks Metal.** In between: DXVK
-  translating D3D8→Vulkan, MoltenVK translating Vulkan→Metal — and DXVK had never
-  been built for iPhoneOS. That took a Meson cross-build and a patch to its Vulkan
-  loader, because iOS confines `dlopen` to the app bundle ([`Patches/dxvk-ios.patch`](Patches/dxvk-ios.patch)).
-- **iOS owns your process.** Open the app switcher and the OS seizes the Metal
-  drawable *without backgrounding you* — draw one more frame and you're dead on
-  resume. The whole render/sim loop learned to hold its breath.
-- **An RTS needs a mouse.** SDL3 (from the lineage below) delivers raw touch events;
-  the RTS semantics on top are new. Taps defer until the 2003 GUI has processed
-  hover (or menu buttons never highlight), a drag has to decide "selection box or
-  camera pan," long-press became right-click, and a cancelled touch must never
-  ghost-click a rally point.
-- **And then the bug hunts** — the best part. The minimap that rendered black
-  because a 2003 texture-format fallback silently dropped the alpha channel. The
-  EVA voice that went randomly mute because one zombie audio stream held a global
-  "don't talk over speech" flag while chirping forever. Every one chased to root
-  cause on a real device, fixed, and offered upstream.
+## Get the source
 
-**→ The war stories: [Porting Playbook §8 — the bug archaeology](docs/port/PORTING_PLAYBOOK.md#8-post-ship-bug-hunts-junejuly-2026--the-archaeology-section)**
-**→ The complete engineering log: [docs/port/PORTING_PLAYBOOK.md](docs/port/PORTING_PLAYBOOK.md)**
-**→ How to do this to another game: [docs/port/PORTING_PATTERNS.md](docs/port/PORTING_PATTERNS.md)**
-
-Worth saying plainly: this was a **human + AI collaboration**. The engineering —
-the C++, the cross-builds, the device debugging — was done by
-[Claude Code](https://claude.com/claude-code) (Anthropic's Claude, Fable model),
-directed and playtested by a human who described symptoms like *"the minimap is
-black"* and *"I hear chirping"* and owned every decision. Neither half ships this
-alone: one of us can't write C++, and the other can't hear the chirping.
-
-## Quick start — macOS
-
-Prerequisites (one time):
+Clone recursively so that the port's reference and platform dependencies are
+available:
 
 ```sh
-# Toolchain
+git clone --recursive https://github.com/moloch--/Generals.git GeneralsX
+cd GeneralsX
+git submodule sync --recursive
+git submodule update --init --recursive --jobs 6
+```
+
+Build products are written below `build/<preset>/`; source files are not changed
+by configuration.
+
+## Compile a default Online server into the client
+
+The standalone [`generals-server`](https://github.com/moloch--/generals-server)
+is a separate Go service. A directory such as `./generals-server` is its source
+checkout; the game does **not** link that directory into the client. Instead,
+the client compiles the server's reachable network endpoint into the executable
+through the CMake cache variable `SAGE_ONLINE_SERVER_DEFAULT`.
+
+An empty value embeds no replacement default and preserves legacy Online unless
+`-onlineServer` supplies a runtime endpoint. Valid non-empty values are a DNS
+name or IPv4 address, an optional port, and an optional lowercase `tls://`
+prefix:
+
+```text
+127.0.0.1:29900
+online.example.net
+tls://online.example.net:29900
+```
+
+If the port is omitted, the client uses TCP port `29900`. Paths, credentials,
+whitespace, other URL schemes, and IPv6 literals are not accepted. A `tls://`
+endpoint requires `SAGE_ONLINE_TLS=ON`; both desktop presets in this README
+enable it. Bare endpoints use plaintext guest sessions for local development,
+while persistent account registration and login require verified TLS.
+
+### Recommended: a machine-local build setting
+
+Create `.generalsx-local.cmake` in the repository root:
+
+```cmake
+set(SAGE_ONLINE_SERVER_DEFAULT "127.0.0.1:29900" CACHE STRING
+    "Default Online service endpoint compiled into modern clients")
+```
+
+For a deployed service, use its public DNS name and TLS endpoint instead:
+
+```cmake
+set(SAGE_ONLINE_SERVER_DEFAULT "tls://online.example.net:29900" CACHE STRING
+    "Default Online service endpoint compiled into modern clients")
+```
+
+The file is intentionally ignored by Git and seeds newly configured build
+directories. If a preset has already been configured, update its cache
+explicitly:
+
+```sh
+cmake --preset macos-vulkan \
+  -DSAGE_ONLINE_SERVER_DEFAULT="127.0.0.1:29900"
+```
+
+Because the local file is read by every newly configured preset, prefer an
+explicit `-D` override when the same checkout is also used for iOS. A desktop
+TLS endpoint is not valid for the current iOS dependency profile, and a phone
+cannot reach the Mac's server through its own `127.0.0.1` address.
+
+The Windows equivalent is shown in the Windows build below. CMake generates
+`build/<preset>/generated/GameNetwork/Online/OnlineBuildConfig.h`, and the value
+is compiled into the native executable.
+
+The endpoint is plain text in the CMake cache, generated header, and executable.
+A runtime override is also printed to standard error and may enter logs. It is
+configuration, **not a secret**: never put a password, admin token, certificate
+private key, or other credential in it.
+
+### Run a local server checkout
+
+For same-machine development, clone the server next to or inside this checkout
+and start only loopback listeners:
+
+```sh
+git clone https://github.com/moloch--/generals-server.git generals-server
+cd generals-server
+go run ./cmd/generals-server \
+  --control-listen 127.0.0.1:29900 \
+  --relay-listen 127.0.0.1:27901 \
+  --health-listen 127.0.0.1:8080 \
+  --public-host 127.0.0.1
+```
+
+This requires Go 1.26 or newer. `127.0.0.1` works only when the game and server
+run on the same computer. For remote players, configure public DNS, verified
+TLS, and the firewall/NAT boundaries described in the
+[server deployment guide](https://github.com/moloch--/generals-server#readme).
+
+For a one-off connection, the runtime `-onlineServer` (or `--onlineServer`)
+argument overrides the compiled endpoint for that process:
+
+```sh
+./scripts/build/macos/run-macos-zh.sh -win \
+  -onlineServer 127.0.0.1:29900
+```
+
+The normal **MULTIPLAYER > NETWORK** LAN path is not changed by this setting.
+See [Online multiplayer](docs/HOWTO/ONLINE_MULTIPLAYER.md) for protocol modes,
+TLS behavior, deployment ports, and troubleshooting.
+
+## Build on macOS
+
+The primary macOS build is native Apple Silicon. It translates DirectX 8 to
+Vulkan with DXVK and then to Metal with MoltenVK.
+
+### 1. Install prerequisites
+
+Install the Xcode command-line tools and build dependencies:
+
+```sh
 xcode-select --install
-brew install cmake ninja meson pkgconf
+brew install cmake ninja meson python3 pkgconf \
+  autoconf autoconf-archive automake libtool \
+  ffmpeg libpng
 brew install --cask steamcmd
-
-# vcpkg (full clone — a shallow clone breaks manifest baselines)
-git clone https://github.com/microsoft/vcpkg ~/vcpkg && ~/vcpkg/bootstrap-vcpkg.sh
-export VCPKG_ROOT=~/vcpkg          # add to your shell profile
-
-# LunarG Vulkan SDK (NOT the Homebrew cask) — https://vulkan.lunarg.com/sdk/home
-export VULKAN_SDK=$HOME/VulkanSDK/<version>/macOS   # add to your shell profile
 ```
 
-Clone, build, get assets, play:
+Do not install Homebrew GLM for this build; GeneralsX supplies its pinned GLM,
+and a second CMake package can create conflicting targets.
+
+Install a full vcpkg checkout. A shallow clone cannot resolve the manifest's
+historical baseline:
 
 ```sh
-git clone https://github.com/ammaarreshi/Generals-Mac-iOS-iPad.git GeneralsX
-cd GeneralsX
-./scripts/build/macos/build-macos-zh.sh     # checks deps, configures, builds
-./scripts/build/macos/deploy-macos-zh.sh    # creates ~/GeneralsX/GeneralsZH + run.sh
-./scripts/get-assets.sh <your_steam_username>   # fetches game data you own
-cd ~/GeneralsX/GeneralsZH && ./run.sh -win
+git clone https://github.com/microsoft/vcpkg.git "$HOME/vcpkg"
+git -C "$HOME/vcpkg" checkout ffc071e0c08432c60c9b64f00334c0227667931b
+"$HOME/vcpkg/bootstrap-vcpkg.sh" -disableMetrics
+export VCPKG_ROOT="$HOME/vcpkg"
+export VCPKG_DEFAULT_TRIPLET=arm64-osx
 ```
 
-## Quick start — iPhone / iPad
-
-On top of the macOS prerequisites: full Xcode (signed into your Apple ID),
-`brew install xcodegen`, and a (free or paid) Apple Developer team.
+Install the macOS Vulkan SDK from
+[LunarG](https://vulkan.lunarg.com/sdk/home#mac), then point the build to the
+SDK's `macOS` directory. The version currently exercised by CI is `1.4.341.1`;
+other SDK versions have not been verified by this repository:
 
 ```sh
-cd GeneralsX
-git submodule update --init references/fbraz3-dxvk   # iOS DXVK is built from this + Patches/dxvk-ios.patch
-./scripts/build/ios/fetch-moltenvk.sh                # pinned MoltenVK.framework (checksummed)
-./scripts/build/ios/stage-fonts.sh                   # Liberation fonts, renamed as the game expects
-cmake --preset ios-vulkan
-cmake --build build/ios-vulkan --target z_generals
-GX_TEAM_ID=<your-team-id> GX_BUNDLE_ID=com.you.generalszh \
-    ./scripts/build/ios/package-ios-zh.sh --install  # assembles, signs, installs
+export VULKAN_SDK="$HOME/VulkanSDK/1.4.341.1/macOS"
 ```
 
-Find your team id in Xcode → Settings → Accounts. Assets ship inside the app
-bundle (self-contained install); `--dev` skips the ~2.7 GB copy for fast code
-iteration.
+Add `VCPKG_ROOT`, `VCPKG_DEFAULT_TRIPLET`, and `VULKAN_SDK` to your shell profile
+if you want them available in future terminals.
 
-## Where things are
+### 2. Fetch the game data you own
 
-| Path | What it is |
-|---|---|
-| [`docs/port/PORTING_PLAYBOOK.md`](docs/port/PORTING_PLAYBOOK.md) | The complete engineering log of this port: every failure mode, root cause, fix — start with [§8, the bug archaeology](docs/port/PORTING_PLAYBOOK.md#8-post-ship-bug-hunts-junejuly-2026--the-archaeology-section): the black minimap, the silent EVA lines, and the chirp |
-| `docs/port/PORTING_PATTERNS.md` | Generalized methodology for porting classic Windows games to Apple platforms |
-| `docs/port/RELEASE_CHECKLIST.md` | Gate for public release |
-| `scripts/get-assets.sh` | Steam asset fetcher (your own copy; app 2732960) |
-| `scripts/build/macos/`, `scripts/build/ios/` | Build, deploy, packaging pipelines |
-| `ios/` | XcodeGen signing-stub project + `ios/config/` (staged Options.ini, dxvk.conf) |
-| `Patches/dxvk-ios.patch` | DXVK changes the iOS d3d8/d3d9 dylibs are built from (applied via the local-fork build) |
+The asset helper signs in through SteamCMD, downloads app `2732960`, and copies
+the required game data into `~/GeneralsX/GeneralsZH`:
 
-## Known issues
+```sh
+./scripts/get-assets.sh <steam-username>
+```
 
-- Long sessions on iPad can be killed by iOS for memory (~3 GB+ resident); the app
-  exits to the home screen with no dialog. Session logs (current + previous) are in
-  the Files app under the game's folder. Under investigation.
-- Backgrounding mid-game can occasionally crash on iOS — the lifecycle pause covers
-  the common paths; a rare race remains. Save often.
+Steam Guard may prompt during the first sign-in. Existing retail data may be
+copied to the same directory instead.
 
-## What's next: Renegade 👀
+### 3. Configure, compile, deploy, and run
 
-Generals had a chain of giants to stand on. **Command & Conquer: Renegade** — EA's
-2002 FPS from the same GPL source release — has far less: no native macOS or iOS
-build of the W3D engine has ever shipped (Mac players today go through Wine-based
-compatibility layers). The [OpenW3D](https://github.com/w3dhub/OpenW3D) community
-project has real cross-platform groundwork — a DXVK wrapper scaffold and SDL3 build
-plumbing — with Mac/Linux on its roadmap, and that groundwork is exactly what we
-built on.
+If `.generalsx-local.cmake` contains the desired Online endpoint:
 
-Same methodology as this repo, much deeper water: OpenW3D's Win32 compat scaffold
-expanded by ~3,000 lines (the engine calls raw Windows APIs for file finding,
-keyboard state, COM), a case-sensitivity strategy for twenty thousand asset paths,
-the DXVK/MoltenVK renderer bring-up, the audio/video stack, and FPS touch controls.
-It's playable today — campaign, cinematics, mission scripts — on a Mac and an
-iPhone. For scale: this Generals port added ~2,200 lines on top of GeneralsX;
-Renegade needed ~6,700 on top of the Windows-only source.
+```sh
+./scripts/build/macos/build-macos-zh.sh
+./scripts/build/macos/deploy-macos-zh.sh
+./scripts/build/macos/run-macos-zh.sh -win
+```
 
-Repo drops soon, with the OpenW3D lineage credited the way this repo credits its
-chain. Same rules: GPL v3, bring your own copy, full engineering log.
+To set the endpoint directly while configuring instead:
+
+```sh
+cmake --preset macos-vulkan \
+  -DSAGE_ONLINE_SERVER_DEFAULT="tls://online.example.net:29900"
+cmake --build build/macos-vulkan --target z_generals --parallel
+./scripts/build/macos/deploy-macos-zh.sh
+./scripts/build/macos/run-macos-zh.sh -win
+```
+
+The first configure and build download and build dependencies, including the
+GeneralsX DXVK fork, so they take longer than an incremental build.
+
+Outputs:
+
+- Zero Hour: `build/macos-vulkan/GeneralsMD/GeneralsXZH`
+- Generals: `build/macos-vulkan/Generals/GeneralsX`
+
+Build the base game with:
+
+```sh
+cmake --build build/macos-vulkan --target g_generals --parallel
+```
+
+The deploy script is intended for a local developer runtime. For a relocatable
+build, follow the
+[self-extracting executable and macOS app guide](docs/HOWTO/BUILD_SELF_EXTRACTING_GAME.md),
+and do not redistribute a package containing retail data.
+
+## Build on Windows
+
+The current native Windows path is a 32-bit x86 Release build made with Visual
+Studio 2022 and vcpkg. It is not the future 64-bit SDL3/DXVK Windows target.
+
+### 1. Install prerequisites
+
+Install Visual Studio 2022 with:
+
+- Desktop development with C++
+- MSVC x86/x64 build tools
+- C++ ATL and MFC components
+- A current Windows SDK
+- CMake and Ninja
+
+Open an **x86 Native Tools Command Prompt for VS 2022** or its Developer
+PowerShell equivalent. The preset expects the shell to provide the x86 compiler
+environment. Use a source path without spaces while the DX8 dependency is being
+modernized.
+
+Install and bootstrap vcpkg from Developer PowerShell:
+
+```powershell
+git clone https://github.com/microsoft/vcpkg C:\src\vcpkg
+& C:\src\vcpkg\bootstrap-vcpkg.bat -disableMetrics
+
+$env:VCPKG_ROOT = 'C:\src\vcpkg'
+$env:VCPKG_DEFAULT_TRIPLET = 'x86-windows'
+```
+
+### 2. Configure and compile
+
+From the GeneralsX repository root, configure Zero Hour with the Online service
+compiled in:
+
+```powershell
+cmake --preset win32-vcpkg `
+  -DVCPKG_TARGET_TRIPLET=x86-windows `
+  -DRTS_BUILD_GENERALS=OFF `
+  -DRTS_BUILD_ZEROHOUR=ON `
+  -DSAGE_ONLINE_SERVER_DEFAULT='tls://online.example.net:29900'
+
+cmake --build --preset win32-vcpkg `
+  --target z_generals `
+  --parallel
+```
+
+For a server on the same Windows computer, replace the endpoint with
+`127.0.0.1:29900`. If you created `.generalsx-local.cmake` before the first
+configure, omit `-DSAGE_ONLINE_SERVER_DEFAULT`; the preset will read that file.
+
+To build both games after using the Zero Hour-only configuration above,
+re-enable the Generals target and then build both targets:
+
+```powershell
+cmake --preset win32-vcpkg `
+  -DVCPKG_TARGET_TRIPLET=x86-windows `
+  -DRTS_BUILD_GENERALS=ON `
+  -DRTS_BUILD_ZEROHOUR=ON
+
+cmake --build --preset win32-vcpkg `
+  --target z_generals g_generals `
+  --parallel
+```
+
+Outputs:
+
+- Zero Hour: `build\win32-vcpkg\GeneralsMD\Release\generalszh.exe`
+- Generals: `build\win32-vcpkg\Generals\Release\generalsv.exe`
+
+If the final link reports unresolved D3DX symbols, apply the temporary Release
+linker accommodation after the first configure, then run the build again:
+
+```powershell
+$d3dx = (Resolve-Path '.\build\win32-vcpkg\_deps\dx8-src\d3dx8.lib').Path
+cmake -S . -B .\build\win32-vcpkg `
+  "-DCMAKE_EXE_LINKER_FLAGS_RELEASE=/INCREMENTAL:NO $d3dx"
+```
+
+This workaround is not a substitute for fixing the dependency target and
+should be removed once that CMake cycle is corrected.
+
+### 3. Prepare a runtime directory
+
+Run the executable beside the data files from your legally owned Windows copy.
+Keep this as a separate GeneralsX runtime directory instead of overwriting the
+retail installation. Copy the retail `binkw32.dll` and `mss32.dll` into that
+directory; they are required imports, and the generated dependency stubs are
+not gameplay replacements.
+
+TLS-enabled builds also need the x86 `libcurl.dll` and `zlib1.dll` from:
+
+```text
+build\win32-vcpkg\vcpkg_installed\x86-windows\bin
+```
+
+Install the Microsoft Visual C++ 2015-2022 x86 Redistributable, or stage the x86
+`MSVCP140.dll`, `MSVCP140_ATOMIC_WAIT.dll`, and `VCRUNTIME140.dll` beside the
+executable. Curl uses Windows Schannel, so OpenSSL DLLs are not required.
+
+The native build and focused Winsock/Schannel paths have been exercised, but
+Windows packaging, end-to-end gameplay validation, and CI are still in
+progress.
+
+## Validate Online endpoint behavior
+
+The focused regression target uses the documentation-only TEST-NET endpoint
+`192.0.2.10:30000`; it validates endpoint parsing, initialization, runtime
+override precedence, and restoration without connecting to a deployment. On
+macOS:
+
+```sh
+cmake --preset macos-vulkan -DRTS_BUILD_ONLINE_TESTS=ON
+cmake --build build/macos-vulkan \
+  --target generalsx_online_endpoint_tests --parallel
+ctest --test-dir build/macos-vulkan \
+  -R '^generalsx_online_endpoint_tests$' --output-on-failure
+```
+
+On Windows, use `win32-vcpkg` for the same configure and build steps and add
+`-C Release` to `ctest`. To verify the endpoint actually configured for the game,
+inspect the generated `OnlineBuildConfig.h` before packaging. A runtime
+`-onlineServer` argument must win over the compiled value; launching without it
+must use the compiled value.
+
+## More documentation
+
+- [Online multiplayer and server deployment](docs/HOWTO/ONLINE_MULTIPLAYER.md)
+- [Self-extracting executable and macOS app packaging](docs/HOWTO/BUILD_SELF_EXTRACTING_GAME.md)
+- [Linux build guide](docs/BUILD/LINUX.md)
+- [Porting playbook](docs/port/PORTING_PLAYBOOK.md)
+- [Porting patterns](docs/port/PORTING_PATTERNS.md)
+- [License](LICENSE.md)
 
 ## Lineage & credits
 
-This port is the newest link in a long chain, and the earlier links did foundational
-work that this repo inherits everywhere:
+GeneralsX is the latest link in a long community lineage. Each earlier project
+provided foundational work that this repository continues to use:
 
-- **Westwood / EA Pacific** — the game; **EA** — the GPL v3 source release
-- **[TheSuperHackers/GeneralsGameCode](https://github.com/TheSuperHackers/GeneralsGameCode)** —
-  the community mainline: build modernization, VC6→modern toolchain, and much of the
-  cross-platform groundwork, including the FFmpeg video backend authored by
-  **[feliwir](https://github.com/feliwir)** (of [OpenSAGE](https://github.com/OpenSAGE/OpenSAGE)),
-  who also authored the OpenAL audio device work this port's audio stack builds on
-- **[Fighter19/CnC_Generals_Zero_Hour](https://github.com/Fighter19/CnC_Generals_Zero_Hour)** —
-  the original Unix/64-bit port: SDL3 platform management, C++17
-  filesystem/threading, Freetype/Fontconfig text rendering, and the DXVK approach
-  this renderer path descends from
-- **[fbraz3/GeneralsX](https://github.com/fbraz3/GeneralsX)** — the macOS/Linux port
-  this fork builds on directly, integrating and extending the above
-- **This fork** — the iOS/iPadOS port (arm64-ios cross-build, DXVK-on-iOS, touch
-  controls, app lifecycle, packaging) and engine fixes, offered upstream
-- **DXVK, MoltenVK, SDL, OpenAL Soft, FFmpeg, Liberation Fonts** — the load-bearing walls
+- **Westwood Studios / EA Pacific** created *Command & Conquer: Generals* and
+  *Zero Hour*; **Electronic Arts** released the engine source under GPL v3.
+- **[TheSuperHackers/GeneralsGameCode](https://github.com/TheSuperHackers/GeneralsGameCode)**
+  maintains the community mainline and its modern toolchain and portability
+  work. **[feliwir](https://github.com/feliwir)** of
+  **[OpenSAGE](https://github.com/OpenSAGE/OpenSAGE)** authored foundational
+  FFmpeg video and OpenAL audio work used by the porting lineage.
+- **[Fighter19/CnC_Generals_Zero_Hour](https://github.com/Fighter19/CnC_Generals_Zero_Hour)**
+  established the original Unix and 64-bit port, including SDL platform work,
+  modern filesystem and threading support, FreeType/Fontconfig rendering, and
+  the DXVK direction inherited here.
+- **[fbraz3/GeneralsX](https://github.com/fbraz3/GeneralsX)** integrated and
+  extended that foundation into the macOS and Linux port from which this
+  repository descends.
+- **[ammaarreshi/Generals-Mac-iOS-iPad](https://github.com/ammaarreshi/Generals-Mac-iOS-iPad)**
+  contributed the Apple-platform fork, including the iPhone/iPad cross-build,
+  DXVK-on-iOS work, touch input, app lifecycle handling, packaging, and engine
+  fixes inherited by this tree.
+- **[jmarshall2323/CnC_Generals_Zero_Hour](https://github.com/jmarshall2323/CnC_Generals_Zero_Hour)**
+  provided an important Windows modernization and OpenAL reference.
+- **GeneralsX contributors** continue the shared desktop clients, deterministic
+  compatibility work, Apple packaging, native Windows bring-up, and the
+  self-hostable replacement Online client and
+  **[generals-server](https://github.com/moloch--/generals-server)** service.
+- **DXVK, MoltenVK, SDL3, OpenAL Soft, FFmpeg, libcurl, vcpkg, FreeType,
+  Fontconfig, and Liberation Fonts** are load-bearing open-source components of
+  the modern platform stack.
 
-Engine code **GPL v3** (EA's source release → the chain above → this fork). Game
-assets: not included, not licensed here.
+Engine code is licensed under **GPL v3** through EA's source release and the
+community lineage above; see [LICENSE.md](LICENSE.md). Original game data is not
+included and is not licensed by this repository.
