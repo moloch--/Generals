@@ -663,10 +663,11 @@ func newEnvironment(entries []string, caseInsensitive bool) (*environment, error
 
 func splitEnvironmentEntry(entry string, allowWindowsPseudoVariable bool) (string, string, error) {
 	separator := strings.IndexByte(entry, '=')
-	if separator == 0 && allowWindowsPseudoVariable {
-		if next := strings.IndexByte(entry[1:], '='); next >= 0 {
-			separator = next + 1
-		}
+	// GeneralsX @bugfix Codex 02/08/2026 Accept only Windows' drive-scoped hidden environment variables.
+	if separator == 0 && allowWindowsPseudoVariable && len(entry) >= 4 &&
+		(('A' <= entry[1] && entry[1] <= 'Z') || ('a' <= entry[1] && entry[1] <= 'z')) &&
+		entry[2] == ':' && entry[3] == '=' {
+		separator = 3
 	}
 	if separator <= 0 {
 		return "", "", fmt.Errorf("invalid environment entry %q", entry)

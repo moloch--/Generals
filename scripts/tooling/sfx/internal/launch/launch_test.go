@@ -304,13 +304,18 @@ func TestPrepareWindows(t *testing.T) {
 	assertNoBaseAssetEnvironment(t, environment)
 }
 
+// GeneralsX @bugfix Codex 02/08/2026 Inherit the real host environment under its native variable semantics.
 func TestPrepareInheritsEnvironmentWhenEnvIsNil(t *testing.T) {
+	targetOS := runtime.GOOS
+	if targetOS != TargetDarwin && targetOS != TargetLinux && targetOS != TargetWindows {
+		t.Skipf("unsupported host target %q", targetOS)
+	}
 	t.Setenv("GENERALSX_LAUNCH_TEST_ENV", "preserved")
 	root, _, _ := makePayload(t, "GeneralsXZH")
 
 	command, err := Prepare(Config{
 		Root:       root,
-		TargetOS:   TargetLinux,
+		TargetOS:   targetOS,
 		Entrypoint: "runtime/GeneralsXZH",
 		WorkDir:    "runtime",
 	})
@@ -318,7 +323,7 @@ func TestPrepareInheritsEnvironmentWhenEnvIsNil(t *testing.T) {
 		t.Fatalf("Prepare() error = %v", err)
 	}
 
-	environment := environmentMap(t, command.Env, false)
+	environment := environmentMap(t, command.Env, targetOS == TargetWindows)
 	assertEnvironmentValue(t, environment, "GENERALSX_LAUNCH_TEST_ENV", "preserved")
 }
 
@@ -605,6 +610,54 @@ func TestPrepareRejectsInvalidEnvironment(t *testing.T) {
 		Env:        []string{"NOT_AN_ENVIRONMENT_ENTRY"},
 	})
 	assertErrorContains(t, err, "invalid environment entry")
+}
+
+// GeneralsX @bugfix Codex 02/08/2026 Preserve Windows drive state without weakening POSIX or NUL validation.
+func TestSplitEnvironmentEntryWindowsPseudoVariable(t *testing.T) {
+	for _, test := range []struct {
+		entry string
+		key   string
+		value string
+	}{
+		{entry: "=C:=C:\\Users\\player", key: "=C:", value: "C:\\Users\\player"},
+		{entry: "=d:=", key: "=d:", value: ""},
+		{entry: "KEY=value=with=equals", key: "KEY", value: "value=with=equals"},
+	} {
+		key, value, err := splitEnvironmentEntry(test.entry, true)
+		if err != nil {
+			t.Fatalf("splitEnvironmentEntry(%q) error = %v", test.entry, err)
+		}
+		if key != test.key || value != test.value {
+			t.Fatalf("splitEnvironmentEntry(%q) = %q, %q", test.entry, key, value)
+		}
+	}
+
+	for _, malformed := range []string{"=C:", "=C=x", "==x", "=CC:=x", "=1:=x"} {
+		if _, _, err := splitEnvironmentEntry(malformed, true); err == nil ||
+			!strings.Contains(err.Error(), "invalid environment entry") {
+			t.Fatalf("splitEnvironmentEntry(%q) error = %v", malformed, err)
+		}
+	}
+
+	if _, _, err := splitEnvironmentEntry("=C:=C:\\Users\\player", false); err == nil ||
+		!strings.Contains(err.Error(), "invalid environment entry") {
+		t.Fatalf("POSIX pseudo-variable error = %v", err)
+	}
+	if _, _, err := splitEnvironmentEntry("=C:=C:\\Users\\player\x00escape", true); err == nil ||
+		!strings.Contains(err.Error(), "NUL byte") {
+		t.Fatalf("NUL pseudo-variable error = %v", err)
+	}
+
+	environment, err := newEnvironment([]string{"=c:=C:\\old", "=C:=C:\\new"}, true)
+	if err != nil {
+		t.Fatalf("newEnvironment() error = %v", err)
+	}
+	entries := environment.entriesCopy()
+	if len(entries) != 1 {
+		t.Fatalf("deduplicated pseudo-variable entries = %#v", entries)
+	}
+	values := environmentMap(t, entries, true)
+	assertEnvironmentValue(t, values, "=C:", "C:\\new")
 }
 
 // GeneralsX @bugfix Codex 02/08/2026 Avoid interpreting Windows drive letters as synthetic Linux list separators.
