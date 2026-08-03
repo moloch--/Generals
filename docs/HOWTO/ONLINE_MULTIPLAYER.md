@@ -25,6 +25,8 @@ preset continues to use the original legacy Online implementation.
   Go repository.
 
 HTTP 8080 is for private health checks and metrics. Do not expose it publicly.
+The optional admin dashboard uses TCP 8081 and must be published only on the
+server host's Tailscale address; it needs no public firewall rule.
 
 ## Run a development server
 
@@ -101,9 +103,10 @@ public relay name:
 Docker Compose and systemd examples are included in the server repository.
 File-backed SQLite databases use WAL, so do not copy only `profiles.db` while
 the service is running: use a SQLite-consistent backup, or stop the service and
-copy the complete database directory or named container volume. The service
-remains single-node; do not point multiple processes at the same SQLite
-database.
+copy the complete database directory. The Compose deployment bind-mounts that
+directory from the host (for example, `/home/moloch/generals-data`) so account
+data remains visible and survives `docker compose down`. The service remains
+single-node; do not point multiple processes at the same SQLite database.
 
 Allow these public firewall rules:
 
@@ -111,6 +114,14 @@ Allow these public firewall rules:
 |---|---|---|
 | 29900 | TCP | TLS Online control connection |
 | 27901 | UDP | Authenticated gameplay relay |
+
+The Compose deployment also serves a bearer-authenticated admin dashboard at
+`http://<tailscale-name>:8081/admin/`. Its port mapping uses the exact address
+from `tailscale ip -4`, so TCP 8081 is reachable through the tailnet but not the
+host's public IPv4 address. The compiled HeroUI dashboard is embedded in the Go
+binary; there is no web directory or separate frontend container to deploy.
+Keep the generated admin token mode `0600`, retrieve it over SSH when needed,
+and never add a public TCP 8081 firewall rule.
 
 Players select TLS by including `tls://` in the endpoint. Certificate and
 hostname verification are mandatory, and the client does not fall back to
