@@ -497,6 +497,8 @@ void StdBIGFileSystem::init() {
 	AsciiString primaryAssetsDirectory;
 	const Bool loadedPrimaryAssets = loadPrimaryGameAssets(this, &primaryAssetsDirectory);
 	DEBUG_ASSERTCRASH(loadedPrimaryAssets, ("No BIG files were loaded for the primary game assets."));
+	// GeneralsX @build Codex 04/08/2026 Keep release builds warning-clean when debug assertions compile out.
+	(void) loadedPrimaryAssets;
 
 	// GeneralsX @bugfix felipebraz 23/03/2026 Propagate the resolved asset root to the local file system.
 	// On Linux/macOS the binary cwd and the game data directory (asset root) are separate. Loose files like

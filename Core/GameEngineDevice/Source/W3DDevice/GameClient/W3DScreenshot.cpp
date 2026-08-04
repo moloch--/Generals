@@ -291,6 +291,8 @@ public:
 		}
 		catch (const std::exception &exception)
 		{
+			// GeneralsX @build Codex 04/08/2026 Keep release builds warning-clean when debug logging compiles out.
+			(void) exception;
 			DEBUG_LOG(("Failed to queue screenshot: %s", exception.what()));
 			return false;
 		}
@@ -390,6 +392,8 @@ private:
 		}
 		catch (const std::exception &exception)
 		{
+			// GeneralsX @build Codex 04/08/2026 Keep release builds warning-clean when debug logging compiles out.
+			(void) exception;
 			DEBUG_LOG(("Screenshot worker failed: %s", exception.what()));
 		}
 		catch (...)
@@ -746,6 +750,8 @@ void W3D_TakeCompressedScreenshot(ScreenshotFormat format, Int jpegQuality)
 	{
 		surfaceCopy->Unlock();
 		surfaceCopy->Release_Ref();
+		// GeneralsX @build Codex 04/08/2026 Keep release builds warning-clean when debug logging compiles out.
+		(void) exception;
 		DEBUG_LOG(("Failed to copy screenshot pixels: %s", exception.what()));
 		return;
 	}

@@ -6,6 +6,7 @@
 _CommonRedist/
 Manuals/
 RedistInstallers/
+launcher/
 steamapps/
 
 GeneralsXZH.dxvk-cache
@@ -21,8 +22,18 @@ run.sh
 # Original Windows executables and redistributable runtime components are not
 # used by the SDL3/OpenAL/FFmpeg macOS build.
 Game.dat
-BINKW32.DLL
+[Bb][Ii][Nn][Kk][Ww]32.[Dd][Ll][Ll]
+[Mm][Ss][Ss]32.[Dd][Ll][Ll]
 P2XDLL.DLL
+d3d8.dll
+DebugWindow.dll
+ParticleEditor.dll
+patchw32.dll
+steam_api.dll
+dbghelp.dll.bak
+Generals.exe
+GenToolUpdater.exe
+WorldBuilder.exe
 MSS/
 ZH_Generals/MSS/
 

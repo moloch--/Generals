@@ -1,11 +1,9 @@
-# GeneralsX @build moloch 30/07/2026 Exclude installer and mutable files from a future Windows runtime payload.
-#
-# Windows packaging is currently experimental because the game binary still
-# has unresolved D3DX, Bink, and Miles runtime dependencies.
+# GeneralsX @build moloch 30/07/2026 Exclude installer, mutable, and shadowing raw engine files from the exploratory Windows runtime payload.
 
 _CommonRedist/
 Manuals/
 RedistInstallers/
+launcher/
 steamapps/
 
 GeneralsXZH.dxvk-cache
@@ -19,6 +17,21 @@ run.sh
 *.so.*
 MoltenVK_icd.json
 fontconfig/
+
+# Replace the original Windows engine/launcher and discard unvalidated helper
+# DLLs that can shadow system libraries. The native build retains only the
+# separately validated retail Bink and Miles imports from the raw depot.
+Game.dat
+d3d8.dll
+DebugWindow.dll
+P2XDLL.DLL
+ParticleEditor.dll
+patchw32.dll
+steam_api.dll
+dbghelp.dll.bak
+Generals.exe
+GenToolUpdater.exe
+WorldBuilder.exe
 
 Patch.doc
 readme.doc

@@ -32,7 +32,102 @@
 #include "Common/PerfTimer.h"
 #include "Win32Device/Common/Win32LocalFileSystem.h"
 #include "Win32Device/Common/Win32LocalFile.h"
+#include <cstdlib>
+#include <filesystem>
 #include <io.h>
+#include <string>
+
+namespace {
+
+// GeneralsX @feature Codex 04/08/2026 Keep authenticated SFX reads separate from writable process state.
+static std::filesystem::path s_assetRootPath;
+
+static std::filesystem::path getSFXRuntimeStateFileSystemPath()
+{
+	const char *statePath = std::getenv("GENERALSX_SFX_RUNTIME_STATE");
+	if (statePath == nullptr || statePath[0] == '\0') {
+		return std::filesystem::path();
+	}
+
+	std::filesystem::path path(statePath);
+	if (!path.is_absolute()) {
+		return std::filesystem::path();
+	}
+	return path.lexically_normal();
+}
+
+static Bool isSafeSFXRelativePath(const std::filesystem::path& path)
+{
+	if (path.empty() || path.is_absolute() || path.has_root_name() || path.has_root_directory()) {
+		return FALSE;
+	}
+	if (path.generic_string().find(':') != std::string::npos) {
+		return FALSE;
+	}
+	for (const auto& component : path.lexically_normal()) {
+		if (component == "..") {
+			return FALSE;
+		}
+	}
+	return TRUE;
+}
+
+static Bool requestsWriteAccess(Int access)
+{
+	return (access & (File::WRITE | File::APPEND | File::CREATE | File::TRUNCATE | File::ONLYNEW)) != 0;
+}
+
+static std::filesystem::path resolveSFXLocalPath(const Char *filename, Int access)
+{
+	std::filesystem::path path(filename);
+	const std::filesystem::path runtimeStatePath = getSFXRuntimeStateFileSystemPath();
+	if (runtimeStatePath.empty() || path.is_absolute()) {
+		return path;
+	}
+	if (!isSafeSFXRelativePath(path)) {
+		return std::filesystem::path();
+	}
+	if (requestsWriteAccess(access)) {
+		return runtimeStatePath / path.lexically_normal();
+	}
+	if (s_assetRootPath.empty()) {
+		return std::filesystem::path();
+	}
+	return s_assetRootPath / path.lexically_normal();
+}
+
+static void appendDirectorySeparator(AsciiString& path)
+{
+	if (path.isEmpty()) {
+		return;
+	}
+	const Char last = path.getCharAt(path.getLength() - 1);
+	if (last != '\\' && last != '/') {
+		path.concat('\\');
+	}
+}
+
+}
+
+AsciiString getWin32SFXRuntimeStatePath()
+{
+	const std::filesystem::path runtimeStatePath = getSFXRuntimeStateFileSystemPath();
+	return runtimeStatePath.empty() ? AsciiString::TheEmptyString : AsciiString(runtimeStatePath.string().c_str());
+}
+
+AsciiString resolveWin32SFXAssetReadPath(const AsciiString& path, const AsciiString& assetRootPath)
+{
+	const std::filesystem::path requested(path.str());
+	if (getSFXRuntimeStateFileSystemPath().empty() || requested.is_absolute()) {
+		return path;
+	}
+
+	const std::filesystem::path assetRoot(assetRootPath.str());
+	if (assetRoot.empty() || !assetRoot.is_absolute() || !isSafeSFXRelativePath(requested)) {
+		return AsciiString::TheEmptyString;
+	}
+	return AsciiString((assetRoot.lexically_normal() / requested.lexically_normal()).string().c_str());
+}
 
 Win32LocalFileSystem::Win32LocalFileSystem() : LocalFileSystem()
 {
@@ -51,27 +146,27 @@ File * Win32LocalFileSystem::openFile(const Char *filename, Int access, size_t b
 		return nullptr;
 	}
 
-	if (access & File::WRITE) {
-		// if opening the file for writing, we need to make sure the directory is there
-		// before we try to create the file.
-		AsciiString string;
-		string = filename;
-		AsciiString token;
-		AsciiString dirName;
-		string.nextToken(&token, "\\/");
-		dirName = token;
-		while ((token.find('.') == nullptr) || (string.find('.') != nullptr)) {
-			createDirectory(dirName);
-			string.nextToken(&token, "\\/");
-			dirName.concat('\\');
-			dirName.concat(token);
+	const std::filesystem::path resolvedPath = resolveSFXLocalPath(filename, access);
+	if (resolvedPath.empty()) {
+		return nullptr;
+	}
+	const std::string resolvedFilename = resolvedPath.string();
+
+	if (requestsWriteAccess(access)) {
+		// GeneralsX @bugfix Codex 04/08/2026 Create writable SFX parents beneath runtime state, including absolute state roots.
+		const std::filesystem::path directory = resolvedPath.parent_path();
+		std::error_code ec;
+		if (!directory.empty() && !std::filesystem::exists(directory, ec)) {
+			if (!std::filesystem::create_directories(directory, ec) || ec) {
+				return nullptr;
+			}
 		}
 	}
 
 	// TheSuperHackers @fix Mauller 21/04/2025 Create new file handle when necessary to prevent memory leak
 	Win32LocalFile *file = newInstance( Win32LocalFile );
 
-	if (file->open(filename, access, bufferSize) == FALSE) {
+	if (file->open(resolvedFilename.c_str(), access, bufferSize) == FALSE) {
 		deleteInstance(file);
 		file = nullptr;
 	} else {
@@ -116,7 +211,8 @@ void Win32LocalFileSystem::reset()
 Bool Win32LocalFileSystem::doesFileExist(const Char *filename) const
 {
 	//USE_PERF_TIMER(Win32LocalFileSystem_doesFileExist)
-	if (_access(filename, 0) == 0) {
+	const std::filesystem::path resolvedPath = resolveSFXLocalPath(filename, File::READ);
+	if (!resolvedPath.empty() && _access(resolvedPath.string().c_str(), 0) == 0) {
 		return TRUE;
 	}
 	return FALSE;
@@ -127,9 +223,20 @@ void Win32LocalFileSystem::getFileListInDirectory(const AsciiString& currentDire
 	HANDLE fileHandle = nullptr;
 	WIN32_FIND_DATA findData;
 
-	AsciiString asciisearch;
-	asciisearch = originalDirectory;
-	asciisearch.concat(currentDirectory);
+	AsciiString logicalDirectory;
+	logicalDirectory = originalDirectory;
+	logicalDirectory.concat(currentDirectory);
+	AsciiString directoryToResolve = logicalDirectory;
+	if (directoryToResolve.isEmpty()) {
+		directoryToResolve = ".";
+	}
+	AsciiString physicalDirectory = resolveAssetReadPath(directoryToResolve);
+	if (physicalDirectory.isEmpty()) {
+		return;
+	}
+
+	AsciiString asciisearch = physicalDirectory;
+	appendDirectorySeparator(asciisearch);
 	asciisearch.concat(searchName);
 
 	Bool done = FALSE;
@@ -143,8 +250,8 @@ void Win32LocalFileSystem::getFileListInDirectory(const AsciiString& currentDire
 			// if we haven't already, add this filename to the list.
 				// a stl set should only allow one copy of each filename
 				AsciiString newFilename;
-				newFilename = originalDirectory;
-				newFilename.concat(currentDirectory);
+				newFilename = logicalDirectory;
+				appendDirectorySeparator(newFilename);
 				newFilename.concat(findData.cFileName);
 				if (filenameList.find(newFilename) == filenameList.end()) {
 					filenameList.insert(newFilename);
@@ -156,9 +263,8 @@ void Win32LocalFileSystem::getFileListInDirectory(const AsciiString& currentDire
 	FindClose(fileHandle);
 
 	if (searchSubdirectories) {
-		AsciiString subdirsearch;
-		subdirsearch = originalDirectory;
-		subdirsearch.concat(currentDirectory);
+		AsciiString subdirsearch = physicalDirectory;
+		appendDirectorySeparator(subdirsearch);
 		subdirsearch.concat("*.");
 		fileHandle = FindFirstFile(subdirsearch.str(), &findData);
 		done = fileHandle == INVALID_HANDLE_VALUE;
@@ -168,7 +274,8 @@ void Win32LocalFileSystem::getFileListInDirectory(const AsciiString& currentDire
 					(strcmp(findData.cFileName, ".") != 0 && strcmp(findData.cFileName, "..") != 0)) {
 
 					AsciiString tempsearchstr;
-					tempsearchstr.concat(currentDirectory);
+					tempsearchstr = currentDirectory;
+					appendDirectorySeparator(tempsearchstr);
 					tempsearchstr.concat(findData.cFileName);
 					tempsearchstr.concat('\\');
 
@@ -188,7 +295,11 @@ Bool Win32LocalFileSystem::getFileInfo(const AsciiString& filename, FileInfo *fi
 {
 	WIN32_FIND_DATA findData;
 	HANDLE findHandle = nullptr;
-	findHandle = FindFirstFile(filename.str(), &findData);
+	const std::filesystem::path resolvedPath = resolveSFXLocalPath(filename.str(), File::READ);
+	if (resolvedPath.empty()) {
+		return FALSE;
+	}
+	findHandle = FindFirstFile(resolvedPath.string().c_str(), &findData);
 
 	if (findHandle == INVALID_HANDLE_VALUE) {
 		return FALSE;
@@ -207,7 +318,12 @@ Bool Win32LocalFileSystem::getFileInfo(const AsciiString& filename, FileInfo *fi
 Bool Win32LocalFileSystem::createDirectory(AsciiString directory)
 {
 	if ((!directory.isEmpty()) && (directory.getLength() < _MAX_DIR)) {
-		return (CreateDirectory(directory.str(), nullptr) != 0);
+		const std::filesystem::path resolvedPath = resolveSFXLocalPath(directory.str(), File::WRITE | File::CREATE);
+		if (resolvedPath.empty()) {
+			return FALSE;
+		}
+		std::error_code ec;
+		return std::filesystem::create_directory(resolvedPath, ec) && !ec;
 	}
 	return FALSE;
 }
@@ -230,4 +346,19 @@ AsciiString Win32LocalFileSystem::normalizePath(const AsciiString& filePath) con
 	}
 
 	return normalizedFilePath;
+}
+
+void Win32LocalFileSystem::setAssetRootPath(const AsciiString& path)
+{
+	std::filesystem::path candidate(path.str());
+	if (candidate.empty() || (!getSFXRuntimeStateFileSystemPath().empty() && !candidate.is_absolute())) {
+		s_assetRootPath.clear();
+		return;
+	}
+	s_assetRootPath = candidate.lexically_normal();
+}
+
+AsciiString Win32LocalFileSystem::resolveAssetReadPath(const AsciiString& path) const
+{
+	return resolveWin32SFXAssetReadPath(path, AsciiString(s_assetRootPath.string().c_str()));
 }

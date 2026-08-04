@@ -28,10 +28,12 @@ payloads, but a retail-sized embed should use AMD64 address space. The launcher
 rejects a payload whose declared wrapper OS or architecture does not match its
 host.
 
-The current macOS child requires macOS 15.0 or newer. The current Linux child
-requires x86_64 glibc 2.38 or newer (an Ubuntu 24.04-class userspace) plus a
-native display and Vulkan-capable GPU/driver stack; bundling application
-libraries does not include the host loader, libc, kernel, or GPU driver.
+The current macOS child declares macOS 15.0, but the effective minimum is the
+highest deployment target among every staged Homebrew/Vulkan dylib and can be
+as new as the build host. The current Linux child requires x86_64 glibc 2.38 or
+newer (an Ubuntu 24.04-class userspace) plus a native display and Vulkan-capable
+GPU/driver stack; bundling application libraries does not include the host
+loader, libc, kernel, or GPU driver.
 
 ## Asset ownership and redistribution
 
@@ -141,7 +143,7 @@ the inherited host value:
 SagePatch and configuration files are resolved inside the stage root, with a
 manifest-working-directory fallback for compatibility with older layouts. The
 native entrypoint and manifest working directory are resolved inside the stage
-root before launch. On macOS and Linux, the child process itself runs with
+root before launch. On every target, the child process itself runs with
 `PWD` and its current directory set to a private, product-stable
 `.runtime-state` directory outside the immutable payload. This contains legacy
 relative writes such as GameSpy identity/queue files and DXVK state while
@@ -149,8 +151,8 @@ asset, library, and configuration paths continue to reference the verified
 stage. SFX mode also makes the Unix platform filesystem resolve relative reads
 only against that asset root (then normal BIG archives) and relative writes
 only against `.runtime-state`, so writable files cannot shadow verified loose
-or archived assets. Windows retains the manifest working directory as its
-process working directory because its legacy filesystem assumptions differ.
+or archived assets. Windows keeps executable and library discovery rooted in
+the verified stage while containing process-relative writes in runtime state.
 
 The packaged executable is a game runtime, not a mod editor. Unix developer
 flows that write a relative temporary file and then expect to read it through
@@ -161,17 +163,18 @@ unpacked development build for those workflows.
 
 | Target | Required stage | Current status |
 |---|---|---|
-| `darwin/arm64` | macOS 15.0+, ARM64 `GeneralsXZH`, ARM64 dylibs under `lib/`, MoltenVK/DXVK/Fontconfig configuration, and owned retail assets | Retail-sized artifact verified; cold and warm-cache launches reached the main menu locally |
+| `darwin/arm64` | Apple Silicon macOS, ARM64 `GeneralsXZH`, ARM64 dylibs under `lib/`, MoltenVK/DXVK/Fontconfig configuration, and owned retail assets; effective minimum follows the newest staged dylib | Retail-sized artifact verified; cold and warm-cache launches reached the main menu locally |
 | `linux/amd64` | x86_64 glibc 2.38+, native display/Vulkan GPU-driver stack, AMD64 `GeneralsXZH`, bundled non-glibc `.so` dependencies, DXVK configuration, safe relative library symlinks, and owned retail assets | Retail-sized artifact and complete ELF closure verified under Linux/AMD64; graphical launch still requires a native Linux/Vulkan host |
-| `windows/amd64` | PE32 `generalszh.exe`, complete runtime DLL set as ordinary files, and owned retail assets | Recommended wrapper architecture for a retail-sized Windows payload; the Go wrapper cross-builds, but the game runtime remains exploratory and is not gameplay-ready |
+| `windows/amd64` | PE32 `generalszh.exe`, complete runtime DLL set as ordinary files, owned retail Bink/Miles DLLs, and retail assets | Native MSVC retail-sized SFX build, full payload verification, and headless startup through Direct3D pass on Windows; rendered gameplay remains exploratory |
 | `windows/386` | Same Windows/x86 stage, with a 32-bit Go wrapper | Small fixture cross-builds pass; a retail-sized `go:embed` payload is not recommended in a 32-bit address space |
 
-The Windows game still imports the missing `d3dx8d.dll`. Its generated Bink
-and Miles DLLs export all names the current game imports, but they are
-deliberate null implementations: audio/video behavior is unimplemented and
-compatibility with retail DLL implementations is unvalidated. Building either
-Windows wrapper does not fix those dependencies and must not be presented as
-a working Windows release.
+The integrated native MSVC packager links the fetched static D3DX archive,
+requires and preserves the user's retail `binkw32.dll` and `mss32.dll`, and
+validates the complete non-system PE dependency closure before packing. It
+never stages the generated Bink/Miles null implementations. These checks make
+the artifact self-contained at the dependency level; they do not establish a
+supported Windows gameplay release. The older MinGW target retains the
+separate limitations documented below.
 
 ## Packer
 
@@ -506,24 +509,31 @@ change can legitimately produce different executable bytes.
 
 The CGO-free Go wrapper cross-builds for `windows/amd64` and `windows/386`.
 Use an AMD64 wrapper around the PE32 game for a retail-sized payload; Windows
-stages must contain no symlinks. This validates only the wrapper path: the
-current MinGW game remains blocked by the missing `d3dx8d.dll` and
-unimplemented Bink/Miles audio/video behavior. The generated Bink/Miles DLLs
-resolve the current import names but intentionally implement them as null
-stubs, and compatibility with retail DLLs is unvalidated. As a concrete format
-check, the packer embedded the current PE32 `generalszh.exe` in small fixture
-stages and produced both a PE32+ AMD64 wrapper and a PE32 i386 wrapper. They
-were not executed on Windows and do not contain the unresolved gameplay
-dependency set. Windows also still uses the payload as its process working
-directory; any legacy relative write not covered by the DXVK state variables
-would invalidate that immutable cache entry. Native Windows integration must
-redirect or otherwise contain those writes before this path is gameplay-ready.
+stages must contain no symlinks. The older MinGW game remains blocked by the
+missing `d3dx8d.dll` and unimplemented Bink/Miles audio/video behavior. Its
+generated Bink/Miles DLLs resolve import names but are intentional null stubs,
+not retail-compatible substitutes. The integrated native MSVC packager does
+not use those stubs: it requires the owned retail DLLs and verifies their PE
+closure. Historic small fixture wrappers established the PE32+/PE32 wrapper
+formats but did not contain the complete gameplay dependency set. Windows runs
+from the stable writable runtime-state directory while executable and DLL
+discovery stays rooted in the verified stage, so relative writes do not
+invalidate the immutable payload.
 
 A game built with the `win32-vcpkg` preset for verified Online TLS imports the
 x86 Release `libcurl.dll` and `zlib1.dll`. A self-contained stage also needs
 `MSVCP140.dll`, `MSVCP140_ATOMIC_WAIT.dll`, and `VCRUNTIME140.dll` beside
 `generalszh.exe`. This curl build uses Windows Schannel, so it does not add
 OpenSSL DLLs to the closure.
+
+The integrated `scripts/build/windows/build-sfx-windows-zh.ps1` flow uses that
+native MSVC build, statically links the fetched D3DX implementation, requires
+the owned retail Bink/Miles binaries, resolves the DLL closure above, and wraps
+the PE32 game in a PE32+ AMD64 launcher. Client-only and optional-server
+retail-sized artifacts have passed native Windows `--sfx-info` and full
+`--sfx-verify`. A headless client launch loaded retail data and DLLs, created
+Direct3D8, and initialized WW3D before the SSH session's expected no-display
+failure; rendered gameplay remains exploratory.
 
 ## Development verification
 

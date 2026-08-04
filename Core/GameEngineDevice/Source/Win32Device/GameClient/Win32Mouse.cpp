@@ -42,6 +42,20 @@
 extern Win32Mouse *TheWin32Mouse;
 
 HCURSOR cursorResources[Mouse::NUM_MOUSE_CURSORS][MAX_2D_CURSOR_DIRECTIONS];
+
+// GeneralsX @feature Codex 04/08/2026 Keep native cursor reads rooted in the authenticated SFX payload.
+static HCURSOR loadCursorFromAssetPath(const Char *filename)
+{
+	AsciiString resolvedPath(filename);
+	if (TheLocalFileSystem != nullptr) {
+		resolvedPath = TheLocalFileSystem->resolveAssetReadPath(resolvedPath);
+	}
+	if (resolvedPath.isEmpty()) {
+		return nullptr;
+	}
+	return LoadCursorFromFile(resolvedPath.str());
+}
+
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 // PRIVATE FUNCTIONS //////////////////////////////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////////////////////////////
@@ -391,13 +405,13 @@ void Win32Mouse::initCursorResources()
 
 					if (TheLocalFileSystem->doesFileExist(fname.str()))
 					{
-						cursorResources[cursor][direction]=LoadCursorFromFile(fname.str());
-						loaded = TRUE;
+						cursorResources[cursor][direction]=loadCursorFromAssetPath(fname.str());
+						loaded = cursorResources[cursor][direction] != nullptr;
 					}
 				}
 
 				if (!loaded)
-					cursorResources[cursor][direction]=LoadCursorFromFile(resourcePath);
+					cursorResources[cursor][direction]=loadCursorFromAssetPath(resourcePath);
 				DEBUG_ASSERTCRASH(cursorResources[cursor][direction], ("MissingCursor %s",resourcePath));
 			}
 		}

@@ -11,6 +11,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"time"
 )
@@ -32,7 +33,7 @@ var defaultLimits = Limits{
 	MaxPathBytes:   4_096,
 }
 
-// DefaultLimits returns a copy of the schema-v1 safety limits.
+// DefaultLimits returns a copy of the bundle safety limits.
 func DefaultLimits() Limits {
 	return defaultLimits
 }
@@ -53,17 +54,18 @@ type ExcludeFunc func(path string, entry fs.DirEntry) (bool, error)
 
 // PackOptions defines immutable bundle metadata and source-tree policy.
 type PackOptions struct {
-	Context     context.Context
-	Product     string
-	Version     string
-	TargetOS    string
-	TargetArch  string
-	Entrypoint  string
-	WorkDir     string
-	Epoch       time.Time
-	Exclude     ExcludeFunc
-	SymlinkMode SymlinkMode
-	Limits      Limits
+	Context                context.Context
+	Product                string
+	Version                string
+	TargetOS               string
+	TargetArch             string
+	Entrypoint             string
+	WorkDir                string
+	OnlineServerEntrypoint string
+	Epoch                  time.Time
+	Exclude                ExcludeFunc
+	SymlinkMode            SymlinkMode
+	Limits                 Limits
 }
 
 type sourceItem struct {
@@ -163,16 +165,22 @@ func collectSource(root string, opts PackOptions, limits Limits) ([]sourceItem, 
 	if workDir == "." {
 		workDir = ""
 	}
+	schemaVersion := SchemaVersion
+	if opts.OnlineServerEntrypoint != "" {
+		// GeneralsX @feature Codex 04/08/2026 Version server-bearing manifests without breaking schema-v1 readers' contract.
+		schemaVersion = OnlineServerSchemaVersion
+	}
 
 	manifest := Manifest{
-		SchemaVersion: SchemaVersion,
-		Product:       opts.Product,
-		Version:       opts.Version,
-		TargetOS:      opts.TargetOS,
-		TargetArch:    opts.TargetArch,
-		Entrypoint:    entrypoint,
-		WorkDir:       workDir,
-		Epoch:         epoch.Unix(),
+		SchemaVersion:          schemaVersion,
+		Product:                opts.Product,
+		Version:                opts.Version,
+		TargetOS:               opts.TargetOS,
+		TargetArch:             opts.TargetArch,
+		Entrypoint:             entrypoint,
+		WorkDir:                workDir,
+		OnlineServerEntrypoint: opts.OnlineServerEntrypoint,
+		Epoch:                  epoch.Unix(),
 	}
 	var items []sourceItem
 	err = filepath.WalkDir(resolvedRoot, func(full string, dirEntry fs.DirEntry, walkErr error) error {
@@ -224,9 +232,6 @@ func collectSource(root string, opts PackOptions, limits Limits) ([]sourceItem, 
 		switch {
 		case info.Mode().IsDir():
 			item.entry.Type = EntryDirectory
-			if opts.TargetOS == "windows" {
-				item.entry.Mode = 0o755
-			}
 		case info.Mode().IsRegular():
 			if info.Size() < 0 || info.Size() > limits.MaxFileSize {
 				return fmt.Errorf("source file %q has invalid size %d", name, info.Size())
@@ -235,9 +240,6 @@ func collectSource(root string, opts PackOptions, limits Limits) ([]sourceItem, 
 				return fmt.Errorf("source tree exceeds %d bytes", limits.MaxTotalSize)
 			}
 			item.entry.Type = EntryFile
-			if opts.TargetOS == "windows" {
-				item.entry.Mode = 0o644
-			}
 			item.entry.Size = info.Size()
 			item.entry.SHA256 = zeroSHA256
 			manifest.TotalSize += info.Size()
@@ -261,6 +263,13 @@ func collectSource(root string, opts PackOptions, limits Limits) ([]sourceItem, 
 		default:
 			return fmt.Errorf("source path %q is a special filesystem node", name)
 		}
+		normalizeSourceEntryMode(
+			&item.entry,
+			runtime.GOOS,
+			opts.TargetOS,
+			entrypoint,
+			opts.OnlineServerEntrypoint,
+		)
 		items = append(items, item)
 		return nil
 	})
@@ -279,6 +288,42 @@ func collectSource(root string, opts PackOptions, limits Limits) ([]sourceItem, 
 		return nil, Manifest{}, fmt.Errorf("validate source manifest: %w", err)
 	}
 	return items, manifest, nil
+}
+
+// GeneralsX @bugfix Codex 04/08/2026 Synthesize POSIX executable bits during native Windows cross-packaging.
+// normalizeSourceEntryMode supplies deterministic archive permissions where
+// Windows cannot represent POSIX executable bits during cross-packaging.
+func normalizeSourceEntryMode(
+	entry *Entry,
+	hostOS string,
+	targetOS string,
+	executablePaths ...string,
+) {
+	if entry == nil || entry.Type == EntrySymlink {
+		return
+	}
+	if targetOS == "windows" {
+		if entry.Type == EntryDirectory {
+			entry.Mode = 0o755
+		} else {
+			entry.Mode = 0o644
+		}
+		return
+	}
+	if hostOS != "windows" {
+		return
+	}
+	if entry.Type == EntryDirectory {
+		entry.Mode = 0o755
+		return
+	}
+	entry.Mode = 0o644
+	for _, executablePath := range executablePaths {
+		if executablePath != "" && entry.Path == executablePath {
+			entry.Mode = 0o755
+			return
+		}
+	}
 }
 
 func normalizedHeader(entry Entry, epoch time.Time) *tar.Header {

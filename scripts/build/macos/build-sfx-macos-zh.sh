@@ -7,6 +7,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
 SFX_MODULE="${PROJECT_ROOT}/scripts/tooling/sfx"
 ASSET_DIR="${GX_SFX_ASSET_DIR:-${HOME}/GeneralsX/GeneralsZH}"
+# GeneralsX @feature Codex 04/08/2026 Optionally authenticate and expose a target-native Online server sidecar.
+SERVER_BINARY="${GX_SFX_SERVER_BINARY:-}"
 OUTPUT="${GX_SFX_OUTPUT:-${PROJECT_ROOT}/build/sfx/GeneralsXZH-macos-arm64-sfx}"
 SFX_APP_OUTPUT="${GX_SFX_APP_OUTPUT:-${PROJECT_ROOT}/build/sfx/GeneralsXZH.app}"
 OUTPUT_DIR=""
@@ -18,6 +20,7 @@ WORK_DIR=""
 MANIFEST_TEMP=""
 STAGE_MANIFEST=""
 RUNTIME_STAGE=""
+ONLINE_SERVER_ENTRY=""
 
 cleanup() {
     if [[ -n "${OUTPUT_TEMP}" &&
@@ -68,6 +71,20 @@ directories_overlap() {
     [[ "${first}" == "${second}" ||
        "${first}" == "${second}/"* ||
        "${second}" == "${first}/"* ]]
+}
+
+validate_online_server_binary() {
+    local candidate="$1"
+
+    if [[ -L "${candidate}" || ! -f "${candidate}" || ! -x "${candidate}" ]]; then
+        echo "ERROR: GX_SFX_SERVER_BINARY must name a regular executable: ${candidate}" >&2
+        return 1
+    fi
+    if ! lipo "${candidate}" -verify_arch arm64 >/dev/null 2>&1 ||
+       ! otool -hv "${candidate}" >/dev/null 2>&1; then
+        echo "ERROR: Online server is not a macOS Mach-O executable with an arm64 slice: ${candidate}" >&2
+        return 1
+    fi
 }
 
 canonicalize_future_directory() {
@@ -385,6 +402,9 @@ and locally owned retail assets, then packages it as a Finder-launchable .app.
 Assets are read from:
   $GX_SFX_ASSET_DIR (default: $HOME/GeneralsX/GeneralsZH)
 
+Set $GX_SFX_SERVER_BINARY to an optional macOS/arm64 generals-server binary.
+It is staged at online-server/generals-server and declared to the SFX launcher.
+
 The raw executable and app outputs can be changed with $GX_SFX_OUTPUT and
 $GX_SFX_APP_OUTPUT, respectively.
 
@@ -416,7 +436,7 @@ if [[ "$(uname -s)" != "Darwin" || "$(uname -m)" != "arm64" ]]; then
     exit 1
 fi
 if ! command -v go >/dev/null 2>&1; then
-    echo "ERROR: Go is required. Install Go 1.22 or newer." >&2
+    echo "ERROR: Go is required. Install Go 1.25 or newer." >&2
     exit 1
 fi
 if ! command -v xz >/dev/null 2>&1; then
@@ -437,6 +457,10 @@ if [[ ! -d "${ASSET_DIR}" ]]; then
     echo "ERROR: Retail asset directory not found: ${ASSET_DIR}" >&2
     exit 1
 fi
+if [[ -n "${SERVER_BINARY}" ]]; then
+    validate_online_server_binary "${SERVER_BINARY}"
+    SERVER_BINARY="$(realpath "${SERVER_BINARY}")"
+fi
 prepare_paths
 if ! find "${ASSET_DIR}" -maxdepth 1 -type f -name '*.big' -print -quit | grep -q .; then
     echo "ERROR: No Zero Hour .big assets found in ${ASSET_DIR}" >&2
@@ -449,7 +473,8 @@ echo "        Build and use it only with assets you own; do not redistribute the
 cd "${PROJECT_ROOT}"
 validate_safe_output_target "${BUNDLE_ZIP}"
 if [[ "${SKIP_GAME_BUILD}" -eq 0 ]]; then
-    "${SCRIPT_DIR}/build-macos-zh.sh" --build-only
+    # GeneralsX @build Codex 04/08/2026 Configure fresh SFX builds so the optional Online endpoint reaches CMake.
+    "${SCRIPT_DIR}/build-macos-zh.sh"
 fi
 "${SCRIPT_DIR}/bundle-macos-zh.sh"
 if [[ ! -f "${BUNDLE_ZIP}" || -L "${BUNDLE_ZIP}" ||
@@ -478,6 +503,10 @@ if ! cp -cR "${ASSET_DIR}/." "${RUNTIME_STAGE}/" 2>/dev/null; then
     else
         cp -R "${ASSET_DIR}/." "${RUNTIME_STAGE}/"
     fi
+fi
+if [[ -e "${RUNTIME_STAGE}/online-server" || -L "${RUNTIME_STAGE}/online-server" ]]; then
+    echo "ERROR: Retail assets contain reserved SFX path: online-server" >&2
+    exit 1
 fi
 
 unzip -q "${BUNDLE_ZIP}" -d "${APP_STAGE}"
@@ -509,6 +538,15 @@ if [[ -f "${EXTRAS_MENU}" ]]; then
     cp "${EXTRAS_MENU}" "${RUNTIME_STAGE}/Window/Menus/ExtrasMenu.wnd"
 fi
 
+if [[ -n "${SERVER_BINARY}" ]]; then
+    echo "Staging optional macOS/arm64 Online server..."
+    mkdir -p "${RUNTIME_STAGE}/online-server"
+    cp "${SERVER_BINARY}" "${RUNTIME_STAGE}/online-server/generals-server"
+    chmod 0755 "${RUNTIME_STAGE}/online-server/generals-server"
+    validate_online_server_binary "${RUNTIME_STAGE}/online-server/generals-server"
+    ONLINE_SERVER_ENTRY="online-server/generals-server"
+fi
+
 echo "Validating staged macOS Mach-O dependency closure..."
 verify_macho_dependency_closure \
     "${RUNTIME_STAGE}/GeneralsXZH" \
@@ -522,19 +560,27 @@ fi
 
 echo "Building self-extracting executable (the xz and Go link stages take several minutes)..."
 OUTPUT_TEMP="$(mktemp "${OUTPUT_DIR}/.$(basename -- "${OUTPUT}").packing.XXXXXX")"
+PACKER_ARGS=(
+    -source "${RUNTIME_STAGE}"
+    -output "${OUTPUT_TEMP}"
+    -target darwin/arm64
+    -entry GeneralsXZH
+    -workdir .
+    -product GeneralsXZH
+    -version "${VERSION}"
+)
+if [[ -n "${ONLINE_SERVER_ENTRY}" ]]; then
+    PACKER_ARGS+=(-online-server-entry "${ONLINE_SERVER_ENTRY}")
+fi
+PACKER_ARGS+=(
+    -exclude "${SFX_MODULE}/profiles/macos-zh.exclude"
+    -module "${SFX_MODULE}"
+    -compression xz
+    -max-embed-bytes 1900000000
+)
 GOENV=off GOFLAGS= GOEXPERIMENT= GOTOOLCHAIN=local GOWORK=off \
 go -C "${SFX_MODULE}" run ./cmd/generalsx-sfx-pack \
-    -source "${RUNTIME_STAGE}" \
-    -output "${OUTPUT_TEMP}" \
-    -target darwin/arm64 \
-    -entry GeneralsXZH \
-    -workdir . \
-    -product GeneralsXZH \
-    -version "${VERSION}" \
-    -exclude "${SFX_MODULE}/profiles/macos-zh.exclude" \
-    -module "${SFX_MODULE}" \
-    -compression xz \
-    -max-embed-bytes 1900000000
+    "${PACKER_ARGS[@]}"
 
 if command -v codesign >/dev/null 2>&1; then
     echo "Applying an ad-hoc macOS signature..."

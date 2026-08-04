@@ -80,6 +80,133 @@ func TestWriteTarDeterministicRoundTrip(t *testing.T) {
 	assertFile(t, filepath.Join(destination, "empty"), "", 0o600)
 }
 
+// GeneralsX @bugfix Codex 04/08/2026 Cover executable-mode synthesis when Windows hosts cross-package POSIX launchers.
+func TestNormalizeSourceEntryModeForWindowsCrossPackaging(t *testing.T) {
+	tests := []struct {
+		name        string
+		entry       Entry
+		hostOS      string
+		targetOS    string
+		executables []string
+		want        uint32
+	}{
+		{
+			name:   "POSIX entrypoint from Windows",
+			entry:  Entry{Path: "bin/game", Type: EntryFile, Mode: 0o666},
+			hostOS: "windows", targetOS: "linux", executables: []string{"bin/game"}, want: 0o755,
+		},
+		{
+			name:   "POSIX sidecar from Windows",
+			entry:  Entry{Path: "online-server/generals-server", Type: EntryFile, Mode: 0o666},
+			hostOS: "windows", targetOS: "darwin",
+			executables: []string{"bin/game", "online-server/generals-server"}, want: 0o755,
+		},
+		{
+			name:   "POSIX asset from Windows",
+			entry:  Entry{Path: "asset.big", Type: EntryFile, Mode: 0o666},
+			hostOS: "windows", targetOS: "linux", executables: []string{"bin/game"}, want: 0o644,
+		},
+		{
+			name:   "POSIX directory from Windows",
+			entry:  Entry{Path: "bin", Type: EntryDirectory, Mode: 0o666},
+			hostOS: "windows", targetOS: "linux", executables: []string{"bin/game"}, want: 0o755,
+		},
+		{
+			name:   "Windows target",
+			entry:  Entry{Path: "game.exe", Type: EntryFile, Mode: 0o755},
+			hostOS: "darwin", targetOS: "windows", executables: []string{"game.exe"}, want: 0o644,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			entry := test.entry
+			normalizeSourceEntryMode(&entry, test.hostOS, test.targetOS, test.executables...)
+			if entry.Mode != test.want {
+				t.Fatalf("normalized mode = %#o, want %#o", entry.Mode, test.want)
+			}
+		})
+	}
+}
+
+// GeneralsX @feature Codex 04/08/2026 Keep schema-v1 payloads compatible while authenticating an optional Online server executable.
+func TestManifestOptionalOnlineServerEntrypointRoundTrip(t *testing.T) {
+	legacy := finalizeManifest(validTestManifest(), []byte("payload"), CompressionXZ)
+	encodedLegacy, err := MarshalManifest(legacy)
+	if err != nil {
+		t.Fatalf("MarshalManifest legacy: %v", err)
+	}
+	if bytes.Contains(encodedLegacy, []byte("online_server_entrypoint")) {
+		t.Fatalf("legacy manifest unexpectedly contains Online server metadata: %s", encodedLegacy)
+	}
+	decodedLegacy, err := ParseManifest(encodedLegacy)
+	if err != nil {
+		t.Fatalf("ParseManifest legacy: %v", err)
+	}
+	if decodedLegacy.OnlineServerEntrypoint != "" {
+		t.Fatalf("legacy Online server entrypoint = %q", decodedLegacy.OnlineServerEntrypoint)
+	}
+
+	withServer := validTestManifestWithOnlineServer()
+	withServer = finalizeManifest(withServer, []byte("payload"), CompressionXZ)
+	encodedServer, err := MarshalManifest(withServer)
+	if err != nil {
+		t.Fatalf("MarshalManifest with server: %v", err)
+	}
+	decodedServer, err := ParseManifest(encodedServer)
+	if err != nil {
+		t.Fatalf("ParseManifest with server: %v", err)
+	}
+	if !reflect.DeepEqual(decodedServer, withServer) {
+		t.Fatalf("Online server manifest round trip changed value:\n got %#v\nwant %#v", decodedServer, withServer)
+	}
+	if decodedServer.SchemaVersion != OnlineServerSchemaVersion {
+		t.Fatalf(
+			"Online server schema = %d, want %d",
+			decodedServer.SchemaVersion,
+			OnlineServerSchemaVersion,
+		)
+	}
+}
+
+func TestManifestRejectsInvalidOnlineServerEntrypoint(t *testing.T) {
+	tests := map[string]func(*Manifest){
+		"unsafe path": func(manifest *Manifest) {
+			manifest.OnlineServerEntrypoint = "../generals-server"
+		},
+		"missing": func(manifest *Manifest) {
+			manifest.OnlineServerEntrypoint = "online-server/missing"
+		},
+		"directory": func(manifest *Manifest) {
+			manifest.OnlineServerEntrypoint = "online-server"
+		},
+		"not executable": func(manifest *Manifest) {
+			for index := range manifest.Entries {
+				if manifest.Entries[index].Path == manifest.OnlineServerEntrypoint {
+					manifest.Entries[index].Mode = 0o644
+				}
+			}
+		},
+	}
+	for name, mutate := range tests {
+		t.Run(name, func(t *testing.T) {
+			manifest := validTestManifestWithOnlineServer()
+			manifest.Entries = append([]Entry(nil), manifest.Entries...)
+			mutate(&manifest)
+			if err := manifest.Validate(); err == nil || !strings.Contains(err.Error(), "online server") {
+				t.Fatalf("Online server validation error = %v", err)
+			}
+		})
+	}
+}
+
+func TestManifestSchemaOneRejectsOnlineServerField(t *testing.T) {
+	manifest := validTestManifestWithOnlineServer()
+	manifest.SchemaVersion = SchemaVersion
+	if err := manifest.Validate(); err == nil || !strings.Contains(err.Error(), "requires bundle manifest schema") {
+		t.Fatalf("schema-v1 Online server error = %v", err)
+	}
+}
+
 // GeneralsX @feature Codex 01/08/2026 Cover byte-accurate extraction progress without changing ExtractTar callers.
 func TestExtractTarWithProgressReportsRegularFileBytes(t *testing.T) {
 	source := t.TempDir()
@@ -742,6 +869,27 @@ func validTestManifest() Manifest {
 		}},
 		TotalSize: int64(len(content)),
 	}
+}
+
+func validTestManifestWithOnlineServer() Manifest {
+	manifest := validTestManifest()
+	manifest.SchemaVersion = OnlineServerSchemaVersion
+	serverContent := []byte("server")
+	serverDigest := sha256.Sum256(serverContent)
+	manifest.OnlineServerEntrypoint = "online-server/generals-server"
+	manifest.Entries = []Entry{
+		{Path: "online-server", Type: EntryDirectory, Mode: 0o755},
+		{
+			Path:   manifest.OnlineServerEntrypoint,
+			Type:   EntryFile,
+			Mode:   0o755,
+			Size:   int64(len(serverContent)),
+			SHA256: fmt.Sprintf("%x", serverDigest),
+		},
+		manifest.Entries[0],
+	}
+	manifest.TotalSize += int64(len(serverContent))
+	return manifest
 }
 
 func finalizeManifest(manifest Manifest, payload []byte, compression string) Manifest {

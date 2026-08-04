@@ -96,7 +96,13 @@ fi
 
 if [[ "$SKIP_CONFIGURE" -eq 0 ]]; then
     echo "Configuring CMake (preset: ${PRESET})..."
-    cmake --preset "${PRESET}" 2>&1 | tee "${LOG_FILE}"
+    CMAKE_CONFIGURE_ARGS=(--preset "${PRESET}")
+    # GeneralsX @build Codex 04/08/2026 Safely propagate an optional compiled Online endpoint.
+    if [[ "${GX_ONLINE_SERVER_DEFAULT+x}" == x ]]; then
+        CMAKE_CONFIGURE_ARGS+=("-DSAGE_ONLINE_SERVER_DEFAULT=${GX_ONLINE_SERVER_DEFAULT}")
+        echo "  Applying Online endpoint from GX_ONLINE_SERVER_DEFAULT (empty clears the cache value)."
+    fi
+    cmake "${CMAKE_CONFIGURE_ARGS[@]}" 2>&1 | tee "${LOG_FILE}"
 fi
 
 JOBS=$(( ($(sysctl -n hw.logicalcpu) + 1) / 2 ))

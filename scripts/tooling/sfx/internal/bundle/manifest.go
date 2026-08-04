@@ -15,8 +15,11 @@ import (
 )
 
 const (
-	// SchemaVersion is the only manifest schema understood by this package.
+	// SchemaVersion is the original game-only manifest schema.
 	SchemaVersion = 1
+	// OnlineServerSchemaVersion adds an authenticated optional sidecar while
+	// retaining read compatibility with schema-v1 bundles.
+	OnlineServerSchemaVersion = 2
 
 	// MaxManifestBytes bounds both generated manifests and untrusted parsing.
 	MaxManifestBytes = 4 << 20
@@ -50,19 +53,20 @@ type Entry struct {
 
 // Manifest authenticates the complete, ordered contents of a bundle tar.
 type Manifest struct {
-	SchemaVersion int     `json:"schema_version"`
-	Product       string  `json:"product"`
-	Version       string  `json:"version"`
-	TargetOS      string  `json:"target_os"`
-	TargetArch    string  `json:"target_arch"`
-	Entrypoint    string  `json:"entrypoint"`
-	WorkDir       string  `json:"work_dir,omitempty"`
-	Epoch         int64   `json:"epoch"`
-	Compression   string  `json:"compression"`
-	PayloadSHA256 string  `json:"payload_sha256"`
-	PayloadSize   int64   `json:"payload_size"`
-	Entries       []Entry `json:"entries"`
-	TotalSize     int64   `json:"total_size"`
+	SchemaVersion          int     `json:"schema_version"`
+	Product                string  `json:"product"`
+	Version                string  `json:"version"`
+	TargetOS               string  `json:"target_os"`
+	TargetArch             string  `json:"target_arch"`
+	Entrypoint             string  `json:"entrypoint"`
+	WorkDir                string  `json:"work_dir,omitempty"`
+	OnlineServerEntrypoint string  `json:"online_server_entrypoint,omitempty"`
+	Epoch                  int64   `json:"epoch"`
+	Compression            string  `json:"compression"`
+	PayloadSHA256          string  `json:"payload_sha256"`
+	PayloadSize            int64   `json:"payload_size"`
+	Entries                []Entry `json:"entries"`
+	TotalSize              int64   `json:"total_size"`
 }
 
 // MarshalManifest validates m and returns deterministic JSON. Struct field
@@ -81,7 +85,7 @@ func MarshalManifest(m Manifest) ([]byte, error) {
 	return data, nil
 }
 
-// ParseManifest decodes one strict schema-v1 JSON document.
+// ParseManifest decodes one strict supported manifest document.
 func ParseManifest(data []byte) (Manifest, error) {
 	var m Manifest
 	if len(data) > MaxManifestBytes {
@@ -126,12 +130,14 @@ func validateManifestJSONFields(data []byte) error {
 		"target_arch":    true,
 		"entrypoint":     true,
 		"work_dir":       true,
-		"epoch":          true,
-		"compression":    true,
-		"payload_sha256": true,
-		"payload_size":   true,
-		"entries":        true,
-		"total_size":     true,
+		// GeneralsX @feature Codex 04/08/2026 Authenticate the optional Online server executable in versioned manifests.
+		"online_server_entrypoint": true,
+		"epoch":                    true,
+		"compression":              true,
+		"payload_sha256":           true,
+		"payload_size":             true,
+		"entries":                  true,
+		"total_size":               true,
 	}
 	for field := range object {
 		if !allowedManifestFields[field] {
@@ -250,7 +256,16 @@ func (m Manifest) ValidatePayload() error {
 }
 
 func (m Manifest) validate(requirePayload bool) error {
-	if m.SchemaVersion != SchemaVersion {
+	switch m.SchemaVersion {
+	case SchemaVersion:
+		if m.OnlineServerEntrypoint != "" {
+			return fmt.Errorf(
+				"online server entrypoint requires bundle manifest schema %d",
+				OnlineServerSchemaVersion,
+			)
+		}
+	case OnlineServerSchemaVersion:
+	default:
 		return fmt.Errorf("unsupported bundle manifest schema %d", m.SchemaVersion)
 	}
 	if err := validateMetadata("product", m.Product); err != nil {
@@ -282,6 +297,11 @@ func (m Manifest) validate(requirePayload bool) error {
 	if m.WorkDir != "" {
 		if err := validateArchivePath(m.WorkDir, m.TargetOS); err != nil {
 			return fmt.Errorf("invalid work directory: %w", err)
+		}
+	}
+	if m.OnlineServerEntrypoint != "" {
+		if err := validateArchivePath(m.OnlineServerEntrypoint, m.TargetOS); err != nil {
+			return fmt.Errorf("invalid online server entrypoint: %w", err)
 		}
 	}
 
@@ -396,6 +416,18 @@ func (m Manifest) validate(requirePayload bool) error {
 		}
 		if workDir.Type != EntryDirectory {
 			return fmt.Errorf("work directory %q is not a directory", m.WorkDir)
+		}
+	}
+	if m.OnlineServerEntrypoint != "" {
+		onlineServer, exists := entriesByPath[m.OnlineServerEntrypoint]
+		if !exists {
+			return fmt.Errorf("online server entrypoint %q is missing from manifest", m.OnlineServerEntrypoint)
+		}
+		if onlineServer.Type != EntryFile {
+			return fmt.Errorf("online server entrypoint %q is not a regular file", m.OnlineServerEntrypoint)
+		}
+		if m.TargetOS != "windows" && onlineServer.Mode&0o100 == 0 {
+			return fmt.Errorf("online server entrypoint %q is not executable", m.OnlineServerEntrypoint)
 		}
 	}
 	return nil

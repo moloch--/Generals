@@ -20,6 +20,27 @@ const (
 	TargetWindows = "windows"
 )
 
+type retailLanguageFamily struct {
+	zeroHourArchive   string
+	zeroHourValue     string
+	baseGeneralsValue string
+}
+
+// Keep this precedence aligned with the native engine's fallback detector.
+// The German base game uses Data/german2 even though Zero Hour uses
+// Data/german, so the two environment values intentionally differ.
+var retailLanguageFamilies = []retailLanguageFamily{
+	{zeroHourArchive: "BrazilianZH.big", zeroHourValue: "brazilian", baseGeneralsValue: "brazilian"},
+	{zeroHourArchive: "EnglishZH.big", zeroHourValue: "english", baseGeneralsValue: "english"},
+	{zeroHourArchive: "GermanZH.big", zeroHourValue: "german", baseGeneralsValue: "german2"},
+	{zeroHourArchive: "FrenchZH.big", zeroHourValue: "french", baseGeneralsValue: "french"},
+	{zeroHourArchive: "ItalianZH.big", zeroHourValue: "italian", baseGeneralsValue: "italian"},
+	{zeroHourArchive: "SpanishZH.big", zeroHourValue: "spanish", baseGeneralsValue: "spanish"},
+	{zeroHourArchive: "ChineseZH.big", zeroHourValue: "chinese", baseGeneralsValue: "chinese"},
+	{zeroHourArchive: "KoreanZH.big", zeroHourValue: "korean", baseGeneralsValue: "korean"},
+	{zeroHourArchive: "PolishZH.big", zeroHourValue: "polish", baseGeneralsValue: "polish"},
+}
+
 // Config describes an extracted payload and the native process to launch.
 //
 // Root is the extracted retail/runtime root. Entrypoint and WorkDir use
@@ -28,7 +49,7 @@ const (
 // Prepare creates a private, content-specific sibling. When Env is nil,
 // Prepare inherits os.Environ. A non-nil Env, including an empty slice, is
 // used as the complete base environment. Context controls the child lifetime;
-// when nil, context.Background is used. On macOS and Linux, the native process
+// when nil, context.Background is used. On every target, the native process
 // runs from RuntimeStateDir while asset and library lookups remain rooted in
 // the immutable payload; this contains legacy relative writes.
 type Config struct {
@@ -37,6 +58,18 @@ type Config struct {
 	TargetOS        string
 	Entrypoint      string
 	WorkDir         string
+	Args            []string
+	Env             []string
+	Context         context.Context
+}
+
+// SidecarConfig describes a payload executable that must run from a dedicated
+// writable directory without applying game-specific preload or asset setup.
+type SidecarConfig struct {
+	Root            string
+	RuntimeStateDir string
+	TargetOS        string
+	Entrypoint      string
 	Args            []string
 	Env             []string
 	Context         context.Context
@@ -100,30 +133,87 @@ func Prepare(config Config) (*exec.Cmd, error) {
 		return nil, err
 	}
 
-	nativeWorkDir := workDir
-	if config.TargetOS == TargetDarwin || config.TargetOS == TargetLinux {
-		nativeWorkDir = runtimeStateDir
-		environment.set("PWD", runtimeStateDir)
-		environment.set("GENERALSX_SFX_RUNTIME_STATE", runtimeStateDir)
+	// GeneralsX @bugfix Codex 04/08/2026 Contain relative game writes outside the authenticated payload on Windows as well as POSIX hosts.
+	nativeWorkDir := runtimeStateDir
+	environment.set("PWD", runtimeStateDir)
+	environment.set("GENERALSX_SFX_RUNTIME_STATE", runtimeStateDir)
+	return prepareCommand(
+		config.Context,
+		executable,
+		config.Args,
+		nativeWorkDir,
+		environment.entriesCopy(),
+	), nil
+}
+
+// PrepareSidecar validates and prepares an embedded auxiliary executable. It
+// deliberately omits all game asset, DXVK, SagePatch, and runtime-library
+// configuration while preserving direct execution and signal forwarding.
+// GeneralsX @feature Codex 04/08/2026 Run the Online server from private mutable state on macOS, Linux, and Windows.
+func PrepareSidecar(config SidecarConfig) (*exec.Cmd, error) {
+	if err := validateTarget(config.TargetOS); err != nil {
+		return nil, err
 	}
-	arguments := append([]string(nil), config.Args...)
-	commandContext := config.Context
+	root, err := resolveRoot(config.Root)
+	if err != nil {
+		return nil, err
+	}
+	executable, err := resolveRequiredPath(root, config.Entrypoint, "sidecar entrypoint", false)
+	if err != nil {
+		return nil, err
+	}
+	runtimeStateDir, err := resolveRuntimeStateDirectory(root, config.RuntimeStateDir)
+	if err != nil {
+		return nil, err
+	}
+
+	baseEnvironment := config.Env
+	if baseEnvironment == nil {
+		baseEnvironment = os.Environ()
+	}
+	environment, err := newEnvironment(baseEnvironment, config.TargetOS == TargetWindows)
+	if err != nil {
+		return nil, fmt.Errorf("prepare environment: %w", err)
+	}
+	environment.set("PWD", runtimeStateDir)
+	command := prepareCommand(
+		config.Context,
+		executable,
+		config.Args,
+		runtimeStateDir,
+		environment.entriesCopy(),
+	)
+	// GeneralsX @feature Codex 04/08/2026 Give server sidecars a graceful Windows console interrupt before the shared five-second kill fallback.
+	configureSidecarProcess(command)
+	command.Cancel = func() error {
+		return terminateSidecarProcess(command.Process, config.Context)
+	}
+	return command, nil
+}
+
+func prepareCommand(
+	ctx context.Context,
+	executable string,
+	arguments []string,
+	workDir string,
+	environment []string,
+) *exec.Cmd {
+	commandContext := ctx
 	if commandContext == nil {
 		commandContext = context.Background()
 	}
-	command := exec.CommandContext(commandContext, executable, arguments...)
+	command := exec.CommandContext(commandContext, executable, append([]string(nil), arguments...)...)
 	configureProcessGroup(command)
 	command.Cancel = func() error {
 		return terminateProcess(command.Process, commandContext)
 	}
 	command.WaitDelay = 5 * time.Second
-	command.Dir = nativeWorkDir
-	command.Env = environment.entriesCopy()
+	command.Dir = workDir
+	command.Env = append([]string(nil), environment...)
 	command.Stdin = os.Stdin
 	command.Stdout = os.Stdout
 	command.Stderr = os.Stderr
-
-	return command, nil
+	return command
 }
 
 // GeneralsX @feature Codex 30/07/2026 Preserve native child exit statuses in the SFX wrapper.
@@ -305,6 +395,15 @@ func configureAssetPaths(environment *environment, root string) error {
 	environment.setDefault("GENERALSX_ASSET_PATH", root)
 	environment.setDefault("CNC_ZH_INSTALLPATH", root)
 
+	language, present, err := detectRetailLanguage(root)
+	if err != nil {
+		return err
+	}
+	if present {
+		environment.setDefault("CNC_ZH_LANGUAGE", language.zeroHourValue)
+		environment.setDefault("CNC_GENERALS_LANGUAGE", language.baseGeneralsValue)
+	}
+
 	baseGenerals, present, err := optionalPayloadDirectory(root, root, "ZH_Generals")
 	if err != nil {
 		return err
@@ -316,6 +415,39 @@ func configureAssetPaths(environment *environment, root string) error {
 	}
 
 	return nil
+}
+
+func detectRetailLanguage(root string) (retailLanguageFamily, bool, error) {
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return retailLanguageFamily{}, false, fmt.Errorf("inspect payload root for retail language: %w", err)
+	}
+	for _, family := range retailLanguageFamilies {
+		matchedName := ""
+		for _, entry := range entries {
+			if !strings.EqualFold(entry.Name(), family.zeroHourArchive) {
+				continue
+			}
+			if matchedName != "" && matchedName != entry.Name() {
+				return retailLanguageFamily{}, false, fmt.Errorf(
+					"payload has case-colliding retail language archives %q and %q",
+					matchedName,
+					entry.Name(),
+				)
+			}
+			matchedName = entry.Name()
+		}
+		if matchedName == "" {
+			continue
+		}
+		if _, present, err := optionalPayloadFile(root, root, matchedName); err != nil {
+			return retailLanguageFamily{}, false, err
+		} else if !present {
+			return retailLanguageFamily{}, false, fmt.Errorf("retail language archive %q disappeared", matchedName)
+		}
+		return family, true, nil
+	}
+	return retailLanguageFamily{}, false, nil
 }
 
 func configureRuntimeSearchPath(environment *environment, root, workDir, key, separator string) error {
@@ -637,6 +769,13 @@ func newEnvironment(entries []string, caseInsensitive bool) (*environment, error
 	}
 
 	for _, entry := range entries {
+		// GeneralsX @bugfix Codex 04/08/2026 Drop Windows drive-current-directory metadata instead of treating it as a portable child variable.
+		// Windows exposes per-drive current-directory pseudo-variables such as
+		// "=C:=C:\\path". Cmd.Dir establishes the child directory explicitly,
+		// so copying these implementation details is unnecessary and brittle.
+		if strings.HasPrefix(entry, "=") {
+			continue
+		}
 		key, value, err := splitEnvironmentEntry(entry, caseInsensitive)
 		if err != nil {
 			return nil, err
@@ -711,7 +850,7 @@ func (environment *environment) prependList(key, value, separator string) {
 	seen := map[string]struct{}{environment.normalizedListValue(value): {}}
 
 	if current != "" {
-		for _, existing := range strings.Split(current, separator) {
+		for _, existing := range splitEnvironmentList(current, separator) {
 			normalized := environment.normalizedListValue(existing)
 			if _, duplicate := seen[normalized]; duplicate {
 				continue
@@ -722,6 +861,33 @@ func (environment *environment) prependList(key, value, separator string) {
 	}
 
 	environment.set(key, strings.Join(values, separator))
+}
+
+// GeneralsX @bugfix Codex 04/08/2026 Preserve drive prefixes in cross-target POSIX search-path tests on Windows.
+// splitEnvironmentList preserves Windows drive-prefix colons when a Windows
+// host prepares a POSIX-target search path during cross-platform tests/builds.
+func splitEnvironmentList(value, separator string) []string {
+	if separator != ":" {
+		return strings.Split(value, separator)
+	}
+	start := 0
+	values := make([]string, 0, strings.Count(value, separator)+1)
+	for index := 0; index < len(value); index++ {
+		if value[index] != ':' {
+			continue
+		}
+		if index == start+1 && isASCIIAlpha(value[start]) && index+1 < len(value) &&
+			(value[index+1] == '\\' || value[index+1] == '/') {
+			continue
+		}
+		values = append(values, value[start:index])
+		start = index + 1
+	}
+	return append(values, value[start:])
+}
+
+func isASCIIAlpha(value byte) bool {
+	return value >= 'A' && value <= 'Z' || value >= 'a' && value <= 'z'
 }
 
 func (environment *environment) normalizedListValue(value string) string {

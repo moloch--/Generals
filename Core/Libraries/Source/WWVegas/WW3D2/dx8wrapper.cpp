@@ -1088,6 +1088,31 @@ void DX8Wrapper::Enumerate_Devices()
 				}
 			}
 
+			// GeneralsX @bugfix Codex 04/08/2026 Keep windowed rendering available when modern or remote drivers expose no enumerable fullscreen modes.
+			// The active desktop mode is necessarily displayable and gives the legacy
+			// device table a safe resolution instead of leaving it empty and later
+			// indexing an invalid RenderDeviceDescClass.
+			if (desc.Enumerate_Resolutions().Count() == 0) {
+				D3DDISPLAYMODE desktop_mode;
+				::ZeroMemory(&desktop_mode, sizeof(D3DDISPLAYMODE));
+				if (D3DInterface->GetAdapterDisplayMode(adapter_index, &desktop_mode) == D3D_OK) {
+					int bits = 0;
+					switch (desktop_mode.Format)
+					{
+						case D3DFMT_R8G8B8:
+						case D3DFMT_A8R8G8B8:
+						case D3DFMT_X8R8G8B8: bits = 32; break;
+						case D3DFMT_R5G6B5:
+						case D3DFMT_X1R5G5B5: bits = 16; break;
+					}
+					if (bits != 0 && desktop_mode.Width > 0 && desktop_mode.Height > 0) {
+						desc.add_resolution(desktop_mode.Width, desktop_mode.Height, bits);
+						fprintf(stderr, "[D3D] Adapter %d exposed no valid fullscreen modes; using desktop mode %ux%u/%d.\n",
+							adapter_index, desktop_mode.Width, desktop_mode.Height, bits);
+					}
+				}
+			}
+
 			// IML: If the device has one or more valid resolutions add it to the device list.
 			// NOTE: Testing has shown that there are drivers with zero resolutions.
 			if (desc.Enumerate_Resolutions().Count() > 0) {

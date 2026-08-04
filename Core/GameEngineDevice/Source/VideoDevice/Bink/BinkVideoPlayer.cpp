@@ -51,6 +51,7 @@
 #include "Common/GameAudio.h"
 #include "Common/GameMemory.h"
 #include "Common/GlobalData.h"
+#include "Common/LocalFileSystem.h"
 #include "Common/Registry.h"
 
 #ifdef _WIN32
@@ -70,6 +71,16 @@
 #define VIDEO_LANG_PATH_FORMAT "Data/%s/Movies/%s.%s"
 #define VIDEO_PATH	"Data\\Movies"
 #define VIDEO_EXT		"bik"
+
+// GeneralsX @feature Codex 04/08/2026 Keep native Bink reads rooted in the authenticated SFX payload.
+static AsciiString resolveBinkAssetPath(const Char *filename)
+{
+	AsciiString resolvedPath(filename);
+	if (TheLocalFileSystem != nullptr) {
+		resolvedPath = TheLocalFileSystem->resolveAssetReadPath(resolvedPath);
+	}
+	return resolvedPath;
+}
 
 
 
@@ -235,7 +246,8 @@ VideoStreamInterface*	BinkVideoPlayer::open( AsciiString movieTitle )
 		{
 			char filePath[ _MAX_PATH ];
 			snprintf( filePath, ARRAY_SIZE(filePath), "%s%s\\%s.%s", TheGlobalData->m_modDir.str(), VIDEO_PATH, pVideo->m_filename.str(), VIDEO_EXT );
-			HBINK handle = BinkOpen(filePath , BINKPRELOADALL );
+			const AsciiString resolvedFilePath = resolveBinkAssetPath(filePath);
+			HBINK handle = resolvedFilePath.isEmpty() ? nullptr : BinkOpen(resolvedFilePath.str(), BINKPRELOADALL);
 			DEBUG_ASSERTLOG(!handle, ("opened bink file %s", filePath));
 			if (handle)
 			{
@@ -245,13 +257,15 @@ VideoStreamInterface*	BinkVideoPlayer::open( AsciiString movieTitle )
 
 		char localizedFilePath[ _MAX_PATH ];
 		snprintf( localizedFilePath, ARRAY_SIZE(localizedFilePath), VIDEO_LANG_PATH_FORMAT, GetRegistryLanguage().str(), pVideo->m_filename.str(), VIDEO_EXT );
-		HBINK handle = BinkOpen(localizedFilePath , BINKPRELOADALL );
+		const AsciiString resolvedLocalizedFilePath = resolveBinkAssetPath(localizedFilePath);
+		HBINK handle = resolvedLocalizedFilePath.isEmpty() ? nullptr : BinkOpen(resolvedLocalizedFilePath.str(), BINKPRELOADALL);
 		DEBUG_ASSERTLOG(!handle, ("opened localized bink file %s", localizedFilePath));
 		if (!handle)
 		{
 			char filePath[ _MAX_PATH ];
 			snprintf( filePath, ARRAY_SIZE(filePath), "%s\\%s.%s", VIDEO_PATH, pVideo->m_filename.str(), VIDEO_EXT );
-			handle = BinkOpen(filePath , BINKPRELOADALL );
+			const AsciiString resolvedFilePath = resolveBinkAssetPath(filePath);
+			handle = resolvedFilePath.isEmpty() ? nullptr : BinkOpen(resolvedFilePath.str(), BINKPRELOADALL);
 			DEBUG_ASSERTLOG(!handle, ("opened bink file %s", localizedFilePath));
 		}
 
@@ -524,4 +538,3 @@ void BinkVideoPlayer::initializeBinkWithMiles(void)
 }
 
 #endif // _WIN32
-

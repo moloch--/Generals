@@ -290,14 +290,88 @@ func TestPrepareWindows(t *testing.T) {
 		t.Fatalf("Prepare() error = %v", err)
 	}
 
-	assertCommandBasics(t, command, executable, workDir, args)
+	stateDir := expectedRuntimeStateDirectory(t, root)
+	assertCommandBasics(t, command, executable, stateDir, args)
 
 	environment := environmentMap(t, command.Env, true)
 	assertEnvironmentValue(t, environment, "PATH", libraryDir+";"+workDir+";C:\\Tools")
 	assertDXVKStateEnvironment(t, environment, root)
-	assertEnvironmentValue(t, environment, "=C:", "C:\\work")
+	assertEnvironmentValue(t, environment, "PWD", stateDir)
+	assertEnvironmentValue(t, environment, "GENERALSX_SFX_RUNTIME_STATE", stateDir)
+	if _, exists := environment["=C:"]; exists {
+		t.Fatal("Windows drive-current-directory pseudo-variable was propagated")
+	}
 	assertPrimaryAssetEnvironment(t, environment, root)
 	assertNoBaseAssetEnvironment(t, environment)
+}
+
+// GeneralsX @feature Codex 04/08/2026 Keep the Online sidecar portable and isolated from game-specific launch configuration.
+func TestPrepareSidecarUsesDedicatedStateOnEveryTarget(t *testing.T) {
+	for _, targetOS := range []string{TargetDarwin, TargetLinux, TargetWindows} {
+		t.Run(targetOS, func(t *testing.T) {
+			root := t.TempDir()
+			entrypoint := "online-server/generals-server"
+			if targetOS == TargetWindows {
+				entrypoint += ".exe"
+			}
+			executable := filepath.Join(root, filepath.FromSlash(entrypoint))
+			if err := os.MkdirAll(filepath.Dir(executable), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(executable, []byte("native server"), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			stateDir := t.TempDir()
+			args := []string{"--control-listen", "127.0.0.1:29900", "literal;argument"}
+
+			command, err := PrepareSidecar(SidecarConfig{
+				Root:            root,
+				RuntimeStateDir: stateDir,
+				TargetOS:        targetOS,
+				Entrypoint:      entrypoint,
+				Args:            args,
+				Env:             []string{"GENERALSX_SIDECAR_TEST=preserved"},
+			})
+			if err != nil {
+				t.Fatalf("PrepareSidecar() error = %v", err)
+			}
+
+			resolvedExecutable, err := filepath.EvalSymlinks(executable)
+			if err != nil {
+				t.Fatal(err)
+			}
+			resolvedStateDir, err := filepath.EvalSymlinks(stateDir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			assertCommandBasics(t, command, resolvedExecutable, resolvedStateDir, args)
+			if command.Cancel == nil {
+				t.Fatal("sidecar command has no graceful cancellation hook")
+			}
+			if command.WaitDelay != 5*time.Second {
+				t.Fatalf("sidecar kill fallback delay = %s, want 5s", command.WaitDelay)
+			}
+
+			environment := environmentMap(t, command.Env, targetOS == TargetWindows)
+			assertEnvironmentValue(t, environment, "GENERALSX_SIDECAR_TEST", "preserved")
+			assertEnvironmentValue(t, environment, "PWD", resolvedStateDir)
+			for _, key := range []string{
+				"CNC_GENERALS_ZH_PATH",
+				"GENERALSX_ASSET_PATH",
+				"GENERALSX_SFX_RUNTIME_STATE",
+				"DXVK_WSI_DRIVER",
+				"DXVK_STATE_CACHE_PATH",
+				"LD_LIBRARY_PATH",
+				"LD_PRELOAD",
+				"DYLD_LIBRARY_PATH",
+				"DYLD_INSERT_LIBRARIES",
+			} {
+				if _, exists := environment[key]; exists {
+					t.Errorf("sidecar environment unexpectedly contains %q", key)
+				}
+			}
+		})
+	}
 }
 
 func TestPrepareInheritsEnvironmentWhenEnvIsNil(t *testing.T) {
@@ -322,6 +396,7 @@ func TestPreparePreservesExplicitEnvironmentPrecedence(t *testing.T) {
 	root, _, _ := makePayload(t, "GeneralsXZH")
 	makePayloadDirectory(t, root, "lib")
 	makePayloadDirectory(t, root, "ZH_Generals")
+	writePayloadFile(t, root, "EnglishZH.big")
 	writePayloadFile(t, root, "MoltenVK_icd.json")
 	writePayloadFile(t, root, "dxvk.conf")
 	writePayloadFile(t, root, "fontconfig/fonts.conf")
@@ -333,6 +408,8 @@ func TestPreparePreservesExplicitEnvironmentPrecedence(t *testing.T) {
 		"CNC_GENERALS_PATH":             "/custom/generals",
 		"GENERALSX_GENERALS_ASSET_PATH": "/custom/compat-generals",
 		"CNC_GENERALS_INSTALLPATH":      "/custom/legacy-generals",
+		"CNC_ZH_LANGUAGE":               "italian",
+		"CNC_GENERALS_LANGUAGE":         "italian",
 		"DXVK_WSI_DRIVER":               "CUSTOM",
 		"DXVK_HUD":                      "fps",
 		"VK_ICD_FILENAMES":              "/custom/icd.json",
@@ -361,6 +438,57 @@ func TestPreparePreservesExplicitEnvironmentPrecedence(t *testing.T) {
 	for key, want := range explicit {
 		assertEnvironmentValue(t, environment, key, want)
 	}
+}
+
+func TestConfigureAssetPathsDetectsEveryRetailLanguage(t *testing.T) {
+	t.Parallel()
+	for _, family := range retailLanguageFamilies {
+		family := family
+		t.Run(family.zeroHourValue, func(t *testing.T) {
+			t.Parallel()
+			root, err := filepath.EvalSymlinks(t.TempDir())
+			if err != nil {
+				t.Fatal(err)
+			}
+			writePayloadFile(t, root, family.zeroHourArchive)
+			environment, err := newEnvironment([]string{}, false)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := configureAssetPaths(environment, root); err != nil {
+				t.Fatalf("configureAssetPaths() error = %v", err)
+			}
+			prepared := environmentMap(t, environment.entriesCopy(), false)
+			assertEnvironmentValue(t, prepared, "CNC_ZH_LANGUAGE", family.zeroHourValue)
+			assertEnvironmentValue(t, prepared, "CNC_GENERALS_LANGUAGE", family.baseGeneralsValue)
+		})
+	}
+}
+
+func TestConfigureAssetPathsRejectsCaseCollidingLanguageArchives(t *testing.T) {
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	writePayloadFile(t, root, "EnglishZH.big")
+	writePayloadFile(t, root, "englishzh.BIG")
+	first, err := os.Stat(filepath.Join(root, "EnglishZH.big"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := os.Stat(filepath.Join(root, "englishzh.BIG"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if os.SameFile(first, second) {
+		t.Skip("filesystem is case-insensitive")
+	}
+	environment, err := newEnvironment([]string{}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = configureAssetPaths(environment, root)
+	assertErrorContains(t, err, "case-colliding retail language archives")
 }
 
 func TestPrepareDefaultsWorkDirToRoot(t *testing.T) {
@@ -623,6 +751,29 @@ func TestEnvironmentListPrependRemovesDuplicates(t *testing.T) {
 	assertEnvironmentValue(t, environment, "LD_LIBRARY_PATH", libraryDir+":"+workDir+":/usr/lib")
 }
 
+func TestSplitEnvironmentListPreservesWindowsDriveColons(t *testing.T) {
+	value := `C:\runtime:C:\lib:/usr/lib:C:\runtime`
+	want := []string{`C:\runtime`, `C:\lib`, `/usr/lib`, `C:\runtime`}
+	if got := splitEnvironmentList(value, ":"); !reflect.DeepEqual(got, want) {
+		t.Fatalf("splitEnvironmentList = %#v, want %#v", got, want)
+	}
+}
+
+func TestNewEnvironmentDropsWindowsDrivePseudoVariablesForCrossTarget(t *testing.T) {
+	environment, err := newEnvironment([]string{
+		`=C:=C:\Users\fixture`,
+		"PRESERVED=value",
+	}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries := environmentMap(t, environment.entriesCopy(), false)
+	if _, exists := entries["=C:"]; exists {
+		t.Fatal("Windows drive-current-directory pseudo-variable was propagated")
+	}
+	assertEnvironmentValue(t, entries, "PRESERVED", "value")
+}
+
 func TestExitCode(t *testing.T) {
 	if code := ExitCode(nil); code != 0 {
 		t.Fatalf("ExitCode(nil) = %d, want 0", code)
@@ -671,7 +822,7 @@ func TestPrepareContextCancellationTerminatesChild(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		executableName += ".exe"
 	}
-	root, workDir, executable := makePayload(t, executableName)
+	root, _, executable := makePayload(t, executableName)
 	if err := os.WriteFile(executable, contents, 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -691,10 +842,7 @@ func TestPrepareContextCancellationTerminatesChild(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	expectedWorkDir := workDir
-	if runtime.GOOS != "windows" {
-		expectedWorkDir = expectedRuntimeStateDirectory(t, root)
-	}
+	expectedWorkDir := expectedRuntimeStateDirectory(t, root)
 	if command.Dir != expectedWorkDir {
 		t.Fatalf("command.Dir = %q, want %q", command.Dir, expectedWorkDir)
 	}

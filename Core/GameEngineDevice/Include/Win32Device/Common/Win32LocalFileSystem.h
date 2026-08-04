@@ -30,6 +30,10 @@
 
 #include "Common/LocalFileSystem.h"
 
+// GeneralsX @feature Codex 04/08/2026 Share safe early-startup and runtime SFX path resolution.
+AsciiString getWin32SFXRuntimeStatePath();
+AsciiString resolveWin32SFXAssetReadPath(const AsciiString& path, const AsciiString& assetRootPath);
+
 class Win32LocalFileSystem : public LocalFileSystem
 {
 public:
@@ -48,6 +52,8 @@ public:
 
 	virtual Bool createDirectory(AsciiString directory) override;
 	virtual AsciiString normalizePath(const AsciiString& filePath) const override;
+	virtual void setAssetRootPath(const AsciiString& path) override;
+	virtual AsciiString resolveAssetReadPath(const AsciiString& path) const override;
 
 protected:
 };

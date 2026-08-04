@@ -93,6 +93,30 @@ func TestRuntimeStateDirectoryIsStableAcrossPayloadVersions(t *testing.T) {
 	assertPrivateDirectory(t, first)
 }
 
+// GeneralsX @feature Codex 04/08/2026 Cover the persistent private state boundary used by an embedded Online server.
+func TestOnlineServerStateDirectoryIsStableAndSeparate(t *testing.T) {
+	t.Parallel()
+
+	manager := newTestManager(t, Options{})
+	first, err := manager.OnlineServerStateDirectory("generalsx-zh")
+	if err != nil {
+		t.Fatalf("first OnlineServerStateDirectory: %v", err)
+	}
+	second, err := manager.OnlineServerStateDirectory("generalsx-zh")
+	if err != nil {
+		t.Fatalf("second OnlineServerStateDirectory: %v", err)
+	}
+	if first != second {
+		t.Fatalf("Online server state paths differ: first %q, second %q", first, second)
+	}
+	want := filepath.Join(manager.Root(), "generalsx-zh", ".runtime-state", "online-server")
+	if first != want {
+		t.Fatalf("Online server state path = %q, want %q", first, want)
+	}
+	assertPrivateDirectory(t, filepath.Dir(first))
+	assertPrivateDirectory(t, first)
+}
+
 func TestEnsureConcurrentCallersPublishOnce(t *testing.T) {
 	t.Parallel()
 

@@ -14,9 +14,27 @@ HOST_UID="$(id -u)"
 HOST_GID="$(id -g)"
 VCPKG_DIR="${VCPKG_DIR:-${HOME}/.generalsx/vcpkg}"
 
+if [[ ! "${PRESET}" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]; then
+    echo "ERROR: Invalid CMake preset name: ${PRESET}" >&2
+    exit 2
+fi
+
+# GeneralsX @bugfix Codex 04/08/2026 Keep the array non-empty for macOS Bash 3.2.
+# Docker's name-only -e form copies a set host value (including empty) and
+# leaves the container variable absent when the host variable is unset.
+DOCKER_ONLINE_ENV=(-e GX_ONLINE_SERVER_DEFAULT)
+
 echo "🐳 Building GeneralsXZH (Linux, preset: ${PRESET})..."
 mkdir -p logs
-mkdir -p "$VCPKG_DIR"
+if [[ -L "$VCPKG_DIR" || ( -e "$VCPKG_DIR" && ! -d "$VCPKG_DIR" ) ]]; then
+    echo "ERROR: vcpkg cache must be a real directory, not a symlink or file: $VCPKG_DIR" >&2
+    exit 1
+fi
+mkdir -p -- "$VCPKG_DIR"
+if [[ -L "$VCPKG_DIR" || ! -d "$VCPKG_DIR" ]]; then
+    echo "ERROR: vcpkg cache changed while it was being prepared: $VCPKG_DIR" >&2
+    exit 1
+fi
 
 if [[ ! -w "$VCPKG_DIR" ]]; then
     echo "ERROR: vcpkg directory is not writable: $VCPKG_DIR" >&2
@@ -46,6 +64,7 @@ docker run --rm \
     --user "${HOST_UID}:${HOST_GID}" \
     -e HOME=/tmp/generalsx-home \
     -e XDG_CACHE_HOME=/tmp/generalsx-cache \
+    "${DOCKER_ONLINE_ENV[@]}" \
     -v "$PWD:/work" \
     -v "$VCPKG_DIR:/opt/vcpkg" \
     -w /work \
@@ -63,10 +82,9 @@ docker run --rm \
         # Bootstrap vcpkg in Docker volume if not exists
         if [ ! -f /opt/vcpkg/vcpkg ]; then
             echo '📦 Bootstrapping vcpkg (first time, will be cached in Docker volume)...'
-            # Clean up if directory exists but is incomplete
-            if [ -d /opt/vcpkg ]; then
-                echo '🧹 Cleaning incomplete vcpkg directory...'
-                rm -rf /opt/vcpkg/* /opt/vcpkg/.git 2>/dev/null || true
+            if find /opt/vcpkg -mindepth 1 -maxdepth 1 -print -quit | grep -q .; then
+                echo 'ERROR: vcpkg cache is non-empty but incomplete; move it aside after reviewing its contents, then rerun.' >&2
+                exit 1
             fi
             git clone https://github.com/microsoft/vcpkg.git /opt/vcpkg
             /opt/vcpkg/bootstrap-vcpkg.sh -disableMetrics
@@ -85,8 +103,14 @@ docker run --rm \
             fi
         fi
         
+        CMAKE_CONFIGURE_ARGS=(--preset '${PRESET}')
+        # GeneralsX @bugfix Codex 04/08/2026 Preserve unset for manual reuse; empty explicitly clears a cached Online endpoint.
+        if [[ \${GX_ONLINE_SERVER_DEFAULT+x} == x ]]; then
+            CMAKE_CONFIGURE_ARGS+=("-DSAGE_ONLINE_SERVER_DEFAULT=\${GX_ONLINE_SERVER_DEFAULT}")
+            echo '🌐 Applying GX_ONLINE_SERVER_DEFAULT (empty clears the cache value).'
+        fi
         echo '⚙️  Configuring CMake with vcpkg...'
-        cmake --preset ${PRESET}
+        cmake "\${CMAKE_CONFIGURE_ARGS[@]}"
         
         echo '🔨 Building GeneralsXZH...'
         cmake --build build/${PRESET} --target z_generals -j\$PROC

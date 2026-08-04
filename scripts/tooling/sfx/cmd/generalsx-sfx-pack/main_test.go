@@ -93,6 +93,56 @@ func TestParseTarget(t *testing.T) {
 	}
 }
 
+func TestParseFlagsAcceptsOnlineServerEntrypoint(t *testing.T) {
+	config, err := parseFlags([]string{
+		"-source", "/payload",
+		"-output", "/output/launcher",
+		"-target", "linux/amd64",
+		"-entry", "bin/game",
+		"-online-server-entry", "online-server/generals-server",
+		"-product", "fixture",
+		"-version", "test",
+	}, io.Discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if config.onlineServerEntrypoint != "online-server/generals-server" {
+		t.Fatalf("Online server entrypoint = %q", config.onlineServerEntrypoint)
+	}
+}
+
+func TestSyncRegularFileUsesWritableWindowsHandle(t *testing.T) {
+	if got := syncRegularFileOpenFlags("windows"); got != os.O_RDWR {
+		t.Fatalf("Windows sync open flags = %#x, want O_RDWR", got)
+	}
+	if got := syncRegularFileOpenFlags("linux"); got != os.O_RDONLY {
+		t.Fatalf("POSIX sync open flags = %#x, want O_RDONLY", got)
+	}
+}
+
+func TestPackedLauncherTestCacheUsesDefaultWindowsLocation(t *testing.T) {
+	root := t.TempDir()
+	cacheRoot, environment := packedLauncherTestCache(root, "windows")
+	localAppData := filepath.Join(root, "local-app-data")
+	wantCacheRoot := filepath.Join(localAppData, "GeneralsX", "sfx")
+	if cacheRoot != wantCacheRoot {
+		t.Fatalf("Windows test cache root = %q, want %q", cacheRoot, wantCacheRoot)
+	}
+	values := make(map[string]string)
+	for _, entry := range environment {
+		key, value, found := strings.Cut(entry, "=")
+		if found {
+			values[strings.ToUpper(key)] = value
+		}
+	}
+	if values["LOCALAPPDATA"] != localAppData {
+		t.Fatalf("LocalAppData = %q, want %q", values["LOCALAPPDATA"], localAppData)
+	}
+	if values["GX_SFX_CACHE"] != "" {
+		t.Fatalf("GX_SFX_CACHE = %q, want empty", values["GX_SFX_CACHE"])
+	}
+}
+
 func TestParseExclusionProfileRejectsMalformedPattern(t *testing.T) {
 	profile := filepath.Join(t.TempDir(), "bad.exclude")
 	writeTestFile(t, profile, []byte("[unterminated\n"), 0o600)
@@ -331,6 +381,48 @@ func TestWriteCompressedPayloadPureGoIsDeterministic(t *testing.T) {
 	}
 }
 
+// GeneralsX @feature Codex 04/08/2026 Propagate the optional Online sidecar declaration into the authenticated manifest.
+func TestWriteCompressedPayloadIncludesOnlineServerEntrypoint(t *testing.T) {
+	source := createPayloadFixture(t)
+	entrypoint := "online-server/generals-server"
+	if runtime.GOOS == "windows" {
+		entrypoint += ".exe"
+	}
+	writeTestFile(
+		t,
+		filepath.Join(source, filepath.FromSlash(entrypoint)),
+		[]byte("native Online server"),
+		0o700,
+	)
+	options := fixturePackOptions(runtime.GOOS, runtime.GOARCH)
+	options.OnlineServerEntrypoint = entrypoint
+	manifest, _, _, err := writeCompressedPayload(
+		context.Background(),
+		source,
+		filepath.Join(t.TempDir(), "payload.tar.xz"),
+		options,
+		1<<20,
+		"",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if manifest.OnlineServerEntrypoint != entrypoint {
+		t.Fatalf(
+			"manifest Online server entrypoint = %q, want %q",
+			manifest.OnlineServerEntrypoint,
+			entrypoint,
+		)
+	}
+	if manifest.SchemaVersion != bundle.OnlineServerSchemaVersion {
+		t.Fatalf(
+			"manifest schema = %d, want %d",
+			manifest.SchemaVersion,
+			bundle.OnlineServerSchemaVersion,
+		)
+	}
+}
+
 func TestWriteCompressedPayloadEnforcesEmbedLimit(t *testing.T) {
 	source := createPayloadFixture(t)
 	output := filepath.Join(t.TempDir(), "payload.tar.xz")
@@ -406,6 +498,20 @@ func TestRunBuildsRealPackedLauncherWithoutTouchingModule(t *testing.T) {
 		t.Fatal(err)
 	}
 	writeTestFile(t, filepath.Join(sourceRoot, "bin", "game"), []byte("native game placeholder"), 0o700)
+	onlineServerEntrypoint := "online-server/generals-server"
+	if runtime.GOOS == "windows" {
+		onlineServerEntrypoint += ".exe"
+	}
+	onlineServerContents := []byte("native Online server placeholder")
+	if runtime.GOOS != "windows" {
+		onlineServerContents = []byte("#!/bin/sh\npwd\nprintf '<%s>\\n' \"$@\"\n")
+	}
+	writeTestFile(
+		t,
+		filepath.Join(sourceRoot, filepath.FromSlash(onlineServerEntrypoint)),
+		onlineServerContents,
+		0o700,
+	)
 	if err := os.Mkdir(filepath.Join(sourceRoot, "ignored"), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -444,6 +550,7 @@ func TestRunBuildsRealPackedLauncherWithoutTouchingModule(t *testing.T) {
 			"-output", outputPath,
 			"-target", runtime.GOOS + "/" + runtime.GOARCH,
 			"-entry", "bin/game",
+			"-online-server-entry", onlineServerEntrypoint,
 			"-workdir", "bin",
 			"-product", "fixture-product",
 			"-version", "1.2.3",
@@ -475,9 +582,9 @@ func TestRunBuildsRealPackedLauncherWithoutTouchingModule(t *testing.T) {
 		t.Fatalf("packer progress output is incomplete: %q", stderr.String())
 	}
 
-	cacheRoot := filepath.Join(root, "cache")
+	cacheRoot, launcherEnvironment := packedLauncherTestCache(root, runtime.GOOS)
 	infoCommand := exec.Command(outputPath, "--sfx-info")
-	infoCommand.Env = append(os.Environ(), "GX_SFX_CACHE="+cacheRoot)
+	infoCommand.Env = launcherEnvironment
 	infoOutput, err := infoCommand.CombinedOutput()
 	if err != nil {
 		t.Fatalf("run packed launcher --sfx-info: %v\n%s", err, infoOutput)
@@ -488,8 +595,9 @@ func TestRunBuildsRealPackedLauncherWithoutTouchingModule(t *testing.T) {
 		"Version:             1.2.3",
 		"Target:              " + runtime.GOOS + "/" + runtime.GOARCH,
 		"Entrypoint:          bin/game",
+		"Online server:       " + onlineServerEntrypoint,
 		"Working directory:   bin",
-		fmt.Sprintf("Manifest entries:    %d", 2+symlinkCount),
+		fmt.Sprintf("Manifest entries:    %d", 4+symlinkCount),
 	} {
 		if !strings.Contains(infoText, expected) {
 			t.Errorf("--sfx-info output missing %q:\n%s", expected, infoText)
@@ -497,7 +605,7 @@ func TestRunBuildsRealPackedLauncherWithoutTouchingModule(t *testing.T) {
 	}
 
 	verifyCommand := exec.Command(outputPath, "--sfx-verify")
-	verifyCommand.Env = append(os.Environ(), "GX_SFX_CACHE="+cacheRoot)
+	verifyCommand.Env = launcherEnvironment
 	verifyOutput, err := verifyCommand.CombinedOutput()
 	if err != nil {
 		t.Fatalf("run packed launcher --sfx-verify: %v\n%s", err, verifyOutput)
@@ -508,6 +616,37 @@ func TestRunBuildsRealPackedLauncherWithoutTouchingModule(t *testing.T) {
 	if _, err := os.Lstat(cacheRoot); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("inspection or verification unexpectedly created the cache root: %v", err)
 	}
+	if runtime.GOOS != "windows" {
+		serverCommand := exec.Command(outputPath, "--sfx-server")
+		serverCommand.Env = launcherEnvironment
+		serverOutput, err := serverCommand.CombinedOutput()
+		if err != nil {
+			t.Fatalf("run packed launcher --sfx-server: %v\n%s", err, serverOutput)
+		}
+		stateDir := filepath.Join(
+			cacheRoot,
+			"fixture-product",
+			".runtime-state",
+			"online-server",
+		)
+		resolvedStateDir, err := filepath.EvalSymlinks(stateDir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		serverText := string(serverOutput)
+		for _, expected := range []string{
+			resolvedStateDir,
+			"<--control-listen>\n<127.0.0.1:29900>",
+			"<--relay-listen>\n<127.0.0.1:27901>",
+			"<--health-listen>\n<127.0.0.1:8080>",
+			"<--public-host>\n<127.0.0.1>",
+			"<--data-file>\n<profiles.db>",
+		} {
+			if !strings.Contains(serverText, expected) {
+				t.Errorf("--sfx-server output missing %q:\n%s", expected, serverText)
+			}
+		}
+	}
 
 	_, generatedErrAfter := os.Lstat(sourceGeneratedPath)
 	if !sameExistenceError(generatedErrBefore, generatedErrAfter) {
@@ -517,6 +656,27 @@ func TestRunBuildsRealPackedLauncherWithoutTouchingModule(t *testing.T) {
 			generatedErrAfter,
 		)
 	}
+}
+
+// GeneralsX @bugfix Codex 04/08/2026 Exercise the policy-approved Windows cache root without a forbidden override.
+// packedLauncherTestCache keeps native Windows tests isolated under a
+// temporary LocalAppData root without bypassing the launcher's DACL policy.
+func packedLauncherTestCache(root, hostOS string) (string, []string) {
+	if hostOS == "windows" {
+		localAppData := filepath.Join(root, "local-app-data")
+		return filepath.Join(localAppData, "GeneralsX", "sfx"), overrideEnvironment(
+			os.Environ(),
+			map[string]string{
+				"GX_SFX_CACHE": "",
+				"LocalAppData": localAppData,
+			},
+		)
+	}
+	cacheRoot := filepath.Join(root, "cache")
+	return cacheRoot, overrideEnvironment(
+		os.Environ(),
+		map[string]string{"GX_SFX_CACHE": cacheRoot},
+	)
 }
 
 func TestWriteCompressedPayloadHonorsCanceledContext(t *testing.T) {

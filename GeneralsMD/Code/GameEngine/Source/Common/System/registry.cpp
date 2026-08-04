@@ -31,6 +31,8 @@
 #include "Common/Registry.h"
 #include "WWLib/registryini.h" // GeneralsX @build OpenAI 30/07/2026 Keep cross-module includes valid with root-only WWVegas paths.
 
+#include <stdlib.h>  // getenv
+
 // GeneralsX @build felipebraz 11/02/2026 Phase 1.5 - Linux port
 // Windows Registry types not available on Linux - define stub types
 #ifdef _UNIX
@@ -40,7 +42,6 @@ typedef void* HKEY;  // Stub type for Linux (unused but needed for compilation)
 #define HKEY_CURRENT_USER   ((HKEY)(uintptr_t)0x80000001)
 #endif
 #include <ctype.h>   // toupper
-#include <stdlib.h>  // getenv
 #include <sys/stat.h> // stat
 #include <unistd.h>  // getcwd
 #endif
@@ -209,6 +210,7 @@ static Bool tryAutoDetectLanguage(AsciiString& val)
 		{ "EnglishZH.big",   "english"   },
 		{ "GermanZH.big",    "german"    },
 		{ "FrenchZH.big",    "french"    },
+		{ "ItalianZH.big",   "italian"   },
 		{ "SpanishZH.big",   "spanish"   },
 		{ "ChineseZH.big",   "chinese"   },
 		{ "KoreanZH.big",    "korean"    },
@@ -310,6 +312,19 @@ Bool GetUnsignedIntFromRegistry(AsciiString path, AsciiString key, UnsignedInt& 
 
 #else // Windows implementation
 
+// GeneralsX @feature Codex 04/08/2026 Let the portable launcher select language without mutating the host registry.
+static Bool getLanguageEnvironment(const char *name, AsciiString& val)
+{
+	const char *envValue = getenv(name);
+	if (envValue != nullptr && envValue[0] != '\0')
+	{
+		val = envValue;
+		return TRUE;
+	}
+
+	return FALSE;
+}
+
 Bool  getStringFromRegistry(HKEY root, AsciiString path, AsciiString key, AsciiString& val)
 {
 	HKEY handle;
@@ -396,6 +411,11 @@ Bool setUnsignedIntInRegistry( HKEY root, AsciiString path, AsciiString key, Uns
 
 Bool GetStringFromGeneralsRegistry(AsciiString path, AsciiString key, AsciiString& val)
 {
+	if (key == "Language" && getLanguageEnvironment("CNC_GENERALS_LANGUAGE", val))
+	{
+		return TRUE;
+	}
+
 	AsciiString fullPath = "SOFTWARE\\Electronic Arts\\EA Games\\Generals";
 
 	fullPath.concat(path);
@@ -410,6 +430,21 @@ Bool GetStringFromGeneralsRegistry(AsciiString path, AsciiString key, AsciiStrin
 
 Bool GetStringFromRegistry(AsciiString path, AsciiString key, AsciiString& val)
 {
+	if (key == "Language")
+	{
+#if RTS_ZEROHOUR
+		if (getLanguageEnvironment("CNC_ZH_LANGUAGE", val))
+		{
+			return TRUE;
+		}
+#elif RTS_GENERALS
+		if (getLanguageEnvironment("CNC_GENERALS_LANGUAGE", val))
+		{
+			return TRUE;
+		}
+#endif
+	}
+
 #if RTS_GENERALS
 	AsciiString fullPath = "SOFTWARE\\Electronic Arts\\EA Games\\Generals";
 #elif RTS_ZEROHOUR

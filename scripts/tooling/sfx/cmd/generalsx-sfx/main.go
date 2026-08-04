@@ -44,6 +44,7 @@ type actionKind uint8
 
 const (
 	actionLaunch actionKind = iota
+	actionServer
 	actionHelp
 	actionInfo
 	actionVerify
@@ -53,9 +54,10 @@ const (
 )
 
 type action struct {
-	kind     actionKind
-	gameArgs []string
-	path     string
+	kind       actionKind
+	gameArgs   []string
+	serverArgs []string
+	path       string
 }
 
 type embeddedBundle struct {
@@ -106,6 +108,10 @@ func run(arguments []string, stdout, stderr io.Writer) int {
 	}
 	if err := validateHost(embedded.manifest); err != nil {
 		fmt.Fprintf(stderr, "GeneralsX SFX: %v\n", err)
+		return 1
+	}
+	if request.kind == actionServer && embedded.manifest.OnlineServerEntrypoint == "" {
+		fmt.Fprintln(stderr, "GeneralsX SFX: this bundle does not include an Online server")
 		return 1
 	}
 
@@ -176,24 +182,41 @@ func run(arguments []string, stdout, stderr io.Writer) int {
 	}
 	defer leasedRuntime.Close()
 	runtimeRoot := leasedRuntime.Path()
-	runtimeStateDir, err := manager.RuntimeStateDirectory(embedded.manifest.Product)
-	if err != nil {
-		fmt.Fprintf(stderr, "GeneralsX SFX: prepare writable runtime state: %v\n", err)
-		return 1
-	}
 
-	command, err := launch.Prepare(launch.Config{
-		Root:            runtimeRoot,
-		RuntimeStateDir: runtimeStateDir,
-		TargetOS:        embedded.manifest.TargetOS,
-		Entrypoint:      embedded.manifest.Entrypoint,
-		WorkDir:         embedded.manifest.WorkDir,
-		Args:            request.gameArgs,
-		Context:         ctx,
-	})
-	if err != nil {
-		fmt.Fprintf(stderr, "GeneralsX SFX: prepare game process: %v\n", err)
-		return 1
+	childLabel := "game"
+	var command *exec.Cmd
+	if request.kind == actionServer {
+		childLabel = "Online server"
+		command, err = prepareOnlineServerCommand(
+			ctx,
+			manager,
+			runtimeRoot,
+			embedded.manifest,
+			request.serverArgs,
+		)
+		if err != nil {
+			fmt.Fprintf(stderr, "GeneralsX SFX: prepare Online server process: %v\n", err)
+			return 1
+		}
+	} else {
+		runtimeStateDir, stateErr := manager.RuntimeStateDirectory(embedded.manifest.Product)
+		if stateErr != nil {
+			fmt.Fprintf(stderr, "GeneralsX SFX: prepare writable runtime state: %v\n", stateErr)
+			return 1
+		}
+		command, err = launch.Prepare(launch.Config{
+			Root:            runtimeRoot,
+			RuntimeStateDir: runtimeStateDir,
+			TargetOS:        embedded.manifest.TargetOS,
+			Entrypoint:      embedded.manifest.Entrypoint,
+			WorkDir:         embedded.manifest.WorkDir,
+			Args:            request.gameArgs,
+			Context:         ctx,
+		})
+		if err != nil {
+			fmt.Fprintf(stderr, "GeneralsX SFX: prepare game process: %v\n", err)
+			return 1
+		}
 	}
 	if err := command.Run(); err != nil {
 		if ctx.Err() != nil {
@@ -209,10 +232,70 @@ func run(arguments []string, stdout, stderr io.Writer) int {
 		if errors.As(err, &childExit) {
 			return launch.ExitCode(err)
 		}
-		fmt.Fprintf(stderr, "GeneralsX SFX: start game: %v\n", err)
+		fmt.Fprintf(stderr, "GeneralsX SFX: start %s: %v\n", childLabel, err)
 		return 1
 	}
 	return 0
+}
+
+// GeneralsX @feature Codex 04/08/2026 Launch the optional Online backend as a separate verified process with private persistent state.
+func prepareOnlineServerCommand(
+	ctx context.Context,
+	manager *cache.Manager,
+	runtimeRoot string,
+	manifest bundle.Manifest,
+	requestedArguments []string,
+) (*exec.Cmd, error) {
+	if manifest.OnlineServerEntrypoint == "" {
+		return nil, errors.New("bundle does not declare an Online server entrypoint")
+	}
+	stateDir, err := manager.OnlineServerStateDirectory(manifest.Product)
+	if err != nil {
+		return nil, err
+	}
+	arguments := onlineServerArguments(requestedArguments)
+	return launch.PrepareSidecar(launch.SidecarConfig{
+		Root:            runtimeRoot,
+		RuntimeStateDir: stateDir,
+		TargetOS:        manifest.TargetOS,
+		Entrypoint:      manifest.OnlineServerEntrypoint,
+		Args:            arguments,
+		Context:         ctx,
+	})
+}
+
+// GeneralsX @bugfix Codex 04/08/2026 Preserve private defaults independently when operators customize the embedded Online server.
+func onlineServerArguments(requested []string) []string {
+	defaults := []struct {
+		name  string
+		value string
+	}{
+		{name: "--control-listen", value: "127.0.0.1:29900"},
+		{name: "--relay-listen", value: "127.0.0.1:27901"},
+		{name: "--health-listen", value: "127.0.0.1:8080"},
+		{name: "--public-host", value: "127.0.0.1"},
+		{name: "--data-file", value: "profiles.db"},
+	}
+
+	arguments := make([]string, 0, len(requested)+(2*len(defaults)))
+	for _, defaultArgument := range defaults {
+		if !hasOnlineServerFlag(requested, defaultArgument.name) {
+			arguments = append(arguments, defaultArgument.name, defaultArgument.value)
+		}
+	}
+	return append(arguments, requested...)
+}
+
+func hasOnlineServerFlag(arguments []string, name string) bool {
+	for _, argument := range arguments {
+		if argument == "--" {
+			break
+		}
+		if argument == name || strings.HasPrefix(argument, name+"=") {
+			return true
+		}
+	}
+	return false
 }
 
 // GeneralsX @feature Codex 01/08/2026 Show native progress only for the process that owns a cache-miss extraction.
@@ -307,6 +390,15 @@ func parseAction(arguments []string) (action, error) {
 			return action{}, errors.New("--sfx-notices does not accept arguments")
 		}
 		return action{kind: actionNotices}, nil
+	case "--sfx-server":
+		serverArgs := arguments[1:]
+		if len(serverArgs) != 0 && serverArgs[0] == "--" {
+			serverArgs = serverArgs[1:]
+		}
+		return action{
+			kind:       actionServer,
+			serverArgs: append([]string(nil), serverArgs...),
+		}, nil
 	case "--sfx-extract":
 		if len(arguments) != 2 || arguments[1] == "" {
 			return action{}, errors.New("--sfx-extract requires exactly one destination directory")
@@ -328,13 +420,19 @@ Usage:
   generalsx-sfx --sfx-extract DIRECTORY
   generalsx-sfx --sfx-purge-cache
   generalsx-sfx --sfx-notices
+  generalsx-sfx --sfx-server [--] [SERVER_ARGUMENT...]
 
 The first normal launch verifies and extracts the embedded native game into a
 content-addressed per-user cache, then executes it directly. Later launches
 reuse that cache. On macOS and Linux, set GX_SFX_CACHE to choose a dedicated
 owner-private cache filesystem. Windows always uses its per-user cache.
 
-Use "--" when a game argument has the same name as an SFX option.`)
+Use "--" when a game argument has the same name as an SFX option. When the
+bundle includes an Online server, --sfx-server runs it from dedicated private
+writable state. Control, relay, and health listeners bind to loopback, the
+advertised host is loopback, and data uses private persistent state unless that
+specific setting is supplied explicitly. Other server arguments do not disable
+these safety defaults.`)
 }
 
 func loadEmbeddedBundle(files fs.FS) (embeddedBundle, error) {
@@ -418,6 +516,11 @@ func writeInfo(writer io.Writer, embedded embeddedBundle, cacheRoot string) {
 	fmt.Fprintf(writer, "Version:             %s\n", manifest.Version)
 	fmt.Fprintf(writer, "Target:              %s/%s\n", manifest.TargetOS, manifest.TargetArch)
 	fmt.Fprintf(writer, "Entrypoint:          %s\n", manifest.Entrypoint)
+	if manifest.OnlineServerEntrypoint == "" {
+		fmt.Fprintln(writer, "Online server:       <not included>")
+	} else {
+		fmt.Fprintf(writer, "Online server:       %s\n", manifest.OnlineServerEntrypoint)
+	}
 	if manifest.WorkDir == "" {
 		fmt.Fprintln(writer, "Working directory:   <payload root>")
 	} else {

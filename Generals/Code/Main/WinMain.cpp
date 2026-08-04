@@ -61,6 +61,7 @@
 #include "GameClient/IMEManager.h"
 #include "Win32Device/GameClient/Win32Mouse.h"
 #include "Win32Device/Common/Win32GameEngine.h"
+#include "Win32Device/Common/Win32LocalFileSystem.h"
 #include "Common/version.h"
 #include "BuildVersion.h"
 #include "GeneratedVersion.h"
@@ -85,6 +86,13 @@ static Bool gDoPaint = true;
 static Bool isWinMainActive = false;
 
 static HBITMAP gLoadScreenBitmap = nullptr;
+
+// GeneralsX @feature Codex 04/08/2026 Resolve the pre-engine splash through the SFX asset root.
+static AsciiString resolveStartupAssetPath(const Char *filename)
+{
+	const Char *assetRoot = getenv("CNC_GENERALS_PATH");
+	return resolveWin32SFXAssetReadPath(AsciiString(filename), AsciiString(assetRoot != nullptr ? assetRoot : ""));
+}
 
 //#define DEBUG_WINDOWS_MESSAGES
 
@@ -824,7 +832,9 @@ Int APIENTRY WinMain( HINSTANCE hInstance, HINSTANCE hPrevInstance,
 		{
 			*pEnd = 0;
 		}
-		::SetCurrentDirectory(buffer);
+		// GeneralsX @bugfix Codex 04/08/2026 Do not override the launcher's writable cwd with the read-only SFX payload.
+		const AsciiString sfxRuntimeStatePath = getWin32SFXRuntimeStatePath();
+		::SetCurrentDirectory(sfxRuntimeStatePath.isNotEmpty() ? sfxRuntimeStatePath.str() : buffer);
 
 
 		#ifdef RTS_DEBUG
@@ -843,7 +853,10 @@ Int APIENTRY WinMain( HINSTANCE hInstance, HINSTANCE hPrevInstance,
 
  		// [SKB: Jun 24 2003 @ 1:50pm] :
 		// Force to be loaded from a file, not a resource so same exe can be used in germany and retail.
- 		gLoadScreenBitmap = (HBITMAP)LoadImage(hInstance, "Install_Final.bmp",	IMAGE_BITMAP, 0, 0, LR_SHARED|LR_LOADFROMFILE);
+		const AsciiString resolvedSplashPath = resolveStartupAssetPath("Install_Final.bmp");
+		if (resolvedSplashPath.isNotEmpty()) {
+			gLoadScreenBitmap = (HBITMAP)LoadImage(hInstance, resolvedSplashPath.str(), IMAGE_BITMAP, 0, 0, LR_SHARED|LR_LOADFROMFILE);
+		}
 
 		CommandLine::parseCommandLineForStartup();
 

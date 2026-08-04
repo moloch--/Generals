@@ -225,6 +225,21 @@ func (manager *Manager) RuntimeStateDirectory(product string) (string, error) {
 	return stateDir, nil
 }
 
+// OnlineServerStateDirectory returns a private, product-stable working
+// directory for a bundled Online server and its SQLite state.
+// GeneralsX @feature Codex 04/08/2026 Keep mutable server data outside the authenticated payload on every host OS.
+func (manager *Manager) OnlineServerStateDirectory(product string) (string, error) {
+	runtimeStateDir, err := manager.RuntimeStateDirectory(product)
+	if err != nil {
+		return "", err
+	}
+	stateDir := filepath.Join(runtimeStateDir, "online-server")
+	if err := ensurePrivateDirectory(stateDir); err != nil {
+		return "", fmt.Errorf("prepare Online server state directory: %w", err)
+	}
+	return stateDir, nil
+}
+
 // Ensure returns a validated runtime protected by a shared runtime lease. A
 // cache miss is extracted under an exclusive acquisition guard and runtime
 // lease into a private staging directory, marked complete, and atomically

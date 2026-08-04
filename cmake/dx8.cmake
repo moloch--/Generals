@@ -26,6 +26,17 @@ if(SAGE_USE_DX8)
     GIT_TAG        7bddff8c01f5fb931c3cb73d4aa8e66d303d97bc
   )
   FetchContent_MakeAvailable(dx8)
+
+  # GeneralsX @build Codex 04/08/2026 Link the bundled static D3DX archive by
+  # absolute path so the native MSVC target resolves the D3DX implementation.
+  if(MSVC AND NOT TARGET sage_d3dx8_static)
+    add_library(sage_d3dx8_static STATIC IMPORTED GLOBAL)
+    set_target_properties(sage_d3dx8_static PROPERTIES
+      IMPORTED_LOCATION "${dx8_SOURCE_DIR}/d3dx8.lib"
+    )
+    target_link_libraries(d3d8lib INTERFACE sage_d3dx8_static)
+  endif()
+
   message(STATUS "Using DirectX 8 SDK (Windows native)")
 
 elseif(APPLE AND SAGE_USE_MOLTENVK)

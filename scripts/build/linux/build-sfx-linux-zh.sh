@@ -7,6 +7,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
 SFX_MODULE="${PROJECT_ROOT}/scripts/tooling/sfx"
 ASSET_DIR="${GX_SFX_ASSET_DIR:-${HOME}/GeneralsX/GeneralsZH}"
+# GeneralsX @feature Codex 04/08/2026 Optionally authenticate and expose a target-native Online server sidecar.
+SERVER_BINARY="${GX_SFX_SERVER_BINARY:-}"
 OUTPUT="${GX_SFX_OUTPUT:-${PROJECT_ROOT}/build/sfx/GeneralsXZH-linux-amd64-sfx}"
 OUTPUT_DIR=""
 BUNDLE_TARBALL="${PROJECT_ROOT}/GeneralsXZH-linux-x86_64.tar.gz"
@@ -17,6 +19,8 @@ REUSE_BUNDLE=0
 WORK_DIR=""
 MANIFEST_TEMP=""
 STAGE_MANIFEST=""
+RUNTIME_STAGE=""
+ONLINE_SERVER_ENTRY=""
 
 cleanup() {
     if [[ -n "${MANIFEST_TEMP}" && "${MANIFEST_TEMP}" == "${OUTPUT_DIR}/.sfx-stage-contents."* ]]; then
@@ -47,6 +51,22 @@ directories_overlap() {
     [[ "${first}" == "${second}" ||
        "${first}" == "${second}/"* ||
        "${second}" == "${first}/"* ]]
+}
+
+validate_online_server_binary() {
+    local candidate="$1"
+    local description
+
+    if [[ -L "${candidate}" || ! -f "${candidate}" || ! -x "${candidate}" ]]; then
+        echo "ERROR: GX_SFX_SERVER_BINARY must name a regular executable: ${candidate}" >&2
+        return 1
+    fi
+    if ! description="$(file -b "${candidate}")" ||
+       [[ "${description}" != ELF\ 64-bit\ LSB*x86-64* ]]; then
+        echo "ERROR: Online server is not a Linux ELF x86-64 executable: ${candidate}" >&2
+        echo "  Detected: ${description:-unknown}" >&2
+        return 1
+    fi
 }
 
 canonicalize_future_directory() {
@@ -242,6 +262,9 @@ Builds one Linux/amd64 Go executable containing the GeneralsXZH runtime and
 the locally owned retail assets from:
   $GX_SFX_ASSET_DIR (default: $HOME/GeneralsX/GeneralsZH)
 
+Set $GX_SFX_SERVER_BINARY to an optional Linux/amd64 generals-server binary.
+It is staged at online-server/generals-server and declared to the SFX launcher.
+
 The native Linux build and portable dependency bundle use the project's
 existing Docker workflow. Output can be changed with $GX_SFX_OUTPUT.
 
@@ -274,7 +297,7 @@ for argument in "$@"; do
 done
 
 if ! command -v go >/dev/null 2>&1; then
-    echo "ERROR: Go is required. Install Go 1.22 or newer." >&2
+    echo "ERROR: Go is required. Install Go 1.25 or newer." >&2
     exit 1
 fi
 if ! command -v xz >/dev/null 2>&1; then
@@ -284,6 +307,14 @@ fi
 if [[ ! -d "${ASSET_DIR}" ]]; then
     echo "ERROR: Retail asset directory not found: ${ASSET_DIR}" >&2
     exit 1
+fi
+if [[ -n "${SERVER_BINARY}" ]]; then
+    if ! command -v file >/dev/null 2>&1; then
+        echo "ERROR: file is required to validate GX_SFX_SERVER_BINARY." >&2
+        exit 1
+    fi
+    validate_online_server_binary "${SERVER_BINARY}"
+    SERVER_BINARY="$(cd "$(dirname "${SERVER_BINARY}")" && pwd -P)/$(basename "${SERVER_BINARY}")"
 fi
 prepare_paths
 if ! find "${ASSET_DIR}" -maxdepth 1 -type f -name '*.big' -print -quit | grep -q .; then
@@ -355,6 +386,10 @@ else
         cp -R "${ASSET_DIR}/." "${RUNTIME_STAGE}/"
     fi
 fi
+if [[ -e "${RUNTIME_STAGE}/online-server" || -L "${RUNTIME_STAGE}/online-server" ]]; then
+    echo "ERROR: Retail assets contain reserved SFX path: online-server" >&2
+    exit 1
+fi
 
 tar -xzf "${BUNDLE_TARBALL}" -C "${BUNDLE_STAGE}"
 PORTABLE_RUNTIME="${BUNDLE_STAGE}/GeneralsXZH-linux"
@@ -391,6 +426,15 @@ if [[ -f "${EXTRAS_MENU}" ]]; then
     cp "${EXTRAS_MENU}" "${RUNTIME_STAGE}/Window/Menus/ExtrasMenu.wnd"
 fi
 
+if [[ -n "${SERVER_BINARY}" ]]; then
+    echo "Staging optional Linux/amd64 Online server..."
+    mkdir -p "${RUNTIME_STAGE}/online-server"
+    cp "${SERVER_BINARY}" "${RUNTIME_STAGE}/online-server/generals-server"
+    chmod 0755 "${RUNTIME_STAGE}/online-server/generals-server"
+    validate_online_server_binary "${RUNTIME_STAGE}/online-server/generals-server"
+    ONLINE_SERVER_ENTRY="online-server/generals-server"
+fi
+
 write_stage_manifest "${RUNTIME_STAGE}" "profiles/linux-zh.exclude"
 
 VERSION="${GX_SFX_VERSION:-$(git -C "${PROJECT_ROOT}" rev-parse --short=12 HEAD)}"
@@ -399,19 +443,27 @@ if [[ -n "$(git -C "${PROJECT_ROOT}" status --porcelain --untracked-files=normal
 fi
 
 echo "Building Linux self-extracting executable..."
+PACKER_ARGS=(
+    -source "${RUNTIME_STAGE}"
+    -output "${OUTPUT}"
+    -target linux/amd64
+    -entry GeneralsXZH
+    -workdir .
+    -product GeneralsXZH
+    -version "${VERSION}"
+)
+if [[ -n "${ONLINE_SERVER_ENTRY}" ]]; then
+    PACKER_ARGS+=(-online-server-entry "${ONLINE_SERVER_ENTRY}")
+fi
+PACKER_ARGS+=(
+    -exclude "${SFX_MODULE}/profiles/linux-zh.exclude"
+    -module "${SFX_MODULE}"
+    -compression xz
+    -max-embed-bytes 1900000000
+)
 GOENV=off GOFLAGS= GOEXPERIMENT= GOTOOLCHAIN=local GOWORK=off \
 go -C "${SFX_MODULE}" run ./cmd/generalsx-sfx-pack \
-    -source "${RUNTIME_STAGE}" \
-    -output "${OUTPUT}" \
-    -target linux/amd64 \
-    -entry GeneralsXZH \
-    -workdir . \
-    -product GeneralsXZH \
-    -version "${VERSION}" \
-    -exclude "${SFX_MODULE}/profiles/linux-zh.exclude" \
-    -module "${SFX_MODULE}" \
-    -compression xz \
-    -max-embed-bytes 1900000000
+    "${PACKER_ARGS[@]}"
 
 echo
 echo "Self-extracting GeneralsXZH Linux build complete:"

@@ -57,6 +57,7 @@
 #include "Common/GameSounds.h"
 #include "Common/CRCDebug.h"
 #include "Common/GlobalData.h"
+#include "Common/LocalFileSystem.h"
 #include "Common/ScopedMutex.h"
 
 #include "GameClient/DebugDisplay.h"
@@ -1351,7 +1352,14 @@ void MilesAudioManager::openDevice()
 		return;
 	}
 
-	AIL_set_redist_directory("MSS\\");
+	// GeneralsX @feature Codex 04/08/2026 Keep native Miles provider reads rooted in the authenticated SFX payload.
+	AsciiString redistDirectory("MSS\\");
+	if (TheLocalFileSystem != nullptr) {
+		redistDirectory = TheLocalFileSystem->resolveAssetReadPath(redistDirectory);
+	}
+	if (redistDirectory.isNotEmpty()) {
+		AIL_set_redist_directory(redistDirectory.str());
+	}
 	AIL_startup();
 	Int retval = 0;
 

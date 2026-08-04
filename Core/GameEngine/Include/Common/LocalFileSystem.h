@@ -43,11 +43,13 @@ public:
 	virtual Bool createDirectory(AsciiString directory) = 0; ///< see FileSystem.h
 	virtual AsciiString normalizePath(const AsciiString& filePath) const = 0;	///< see FileSystem.h
 
-	// GeneralsX @bugfix felipebraz 23/03/2026 On Linux/macOS the binary cwd and the asset root (game data dir) are
-	// separate. Relative paths like "Data\Scripts\..." are resolved from cwd on Windows (where cwd == install dir)
-	// and must also be resolvable from the asset root (CNC_GENERALS_ZH_PATH) on Linux/macOS.
-	// This no-op default allows Win32LocalFileSystem to inherit it unchanged.
+	// GeneralsX @bugfix felipebraz 23/03/2026 Allow platform file systems to resolve loose data separately from cwd.
 	virtual void setAssetRootPath(const AsciiString& /*path*/) {}
+
+	// GeneralsX @feature Codex 04/08/2026 Resolve direct native asset readers through the authenticated SFX root.
+	// The default preserves legacy behavior; SFX-aware platform implementations
+	// may return an empty string when a relative path is unsafe or unavailable.
+	virtual AsciiString resolveAssetReadPath(const AsciiString& path) const { return path; }
 
 protected:
 };

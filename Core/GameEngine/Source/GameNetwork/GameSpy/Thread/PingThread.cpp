@@ -290,7 +290,10 @@ void PingThreadClass::Thread_Function()
 			else
 			{
 				in_addr *hostNode = (in_addr *) hostStruct->h_addr;
-				}
+				// GeneralsX @bugfix Codex 04/08/2026 Restore the resolved address used by hostname ping requests.
+				IP = hostNode->s_addr;
+				DEBUG_LOG(("pinging %s IP = %s", hostnameBuffer, inet_ntoa(*hostNode) ));
+			}
 			}
 
 			// do ping

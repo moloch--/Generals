@@ -498,6 +498,13 @@ void Win32BIGFileSystem::init() {
 	AsciiString primaryAssetsDirectory;
 	const Bool loadedPrimaryAssets = loadPrimaryGameAssets(this, &primaryAssetsDirectory);
 	DEBUG_ASSERTCRASH(loadedPrimaryAssets, ("No BIG files were loaded for the primary game assets."));
+	// GeneralsX @build Codex 04/08/2026 Keep release builds warning-clean when debug assertions compile out.
+	(void) loadedPrimaryAssets;
+
+	// GeneralsX @feature Codex 04/08/2026 Resolve loose SFX reads from the authenticated payload while cwd remains writable state.
+	if (primaryAssetsDirectory.isNotEmpty()) {
+		TheLocalFileSystem->setAssetRootPath(primaryAssetsDirectory);
+	}
 
 #if RTS_ZEROHOUR
     loadBaseGeneralsAssetsForZH(this, primaryAssetsDirectory);

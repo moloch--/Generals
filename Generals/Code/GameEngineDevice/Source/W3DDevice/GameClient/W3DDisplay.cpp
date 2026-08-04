@@ -548,6 +548,11 @@ static bool s_filteredDirty = true;
 static void buildFilteredResolutions()
 {
 	s_filteredResolutions.clear();
+	// GeneralsX @bugfix Codex 04/08/2026 Do not index an empty render-device table on modern or remote Windows displays.
+	if (WW3D::Get_Render_Device_Count() <= 0) {
+		s_filteredDirty = false;
+		return;
+	}
 	const RenderDeviceDescClass &devDesc = WW3D::Get_Render_Device_Desc(0);
 	const DynamicVectorClass<ResolutionDescClass> &resolutions = devDesc.Enumerate_Resolutions();
 

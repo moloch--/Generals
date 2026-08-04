@@ -37,17 +37,18 @@ const (
 var errPayloadTooLarge = errors.New("compressed payload exceeds maximum embedded size")
 
 type packConfig struct {
-	source        string
-	output        string
-	target        string
-	entrypoint    string
-	workDir       string
-	product       string
-	version       string
-	excludeFile   string
-	moduleRoot    string
-	compression   string
-	maxEmbedBytes int64
+	source                 string
+	output                 string
+	target                 string
+	entrypoint             string
+	workDir                string
+	onlineServerEntrypoint string
+	product                string
+	version                string
+	excludeFile            string
+	moduleRoot             string
+	compression            string
+	maxEmbedBytes          int64
 }
 
 type exclusionRule struct {
@@ -177,16 +178,17 @@ func run(ctx context.Context, arguments []string, stdout, stderr io.Writer) erro
 		symlinkMode = bundle.RejectSymlinks
 	}
 	packOptions := bundle.PackOptions{
-		Context:     ctx,
-		Product:     config.product,
-		Version:     config.version,
-		TargetOS:    targetOS,
-		TargetArch:  targetArch,
-		Entrypoint:  config.entrypoint,
-		WorkDir:     config.workDir,
-		Epoch:       epoch,
-		Exclude:     exclude,
-		SymlinkMode: symlinkMode,
+		Context:                ctx,
+		Product:                config.product,
+		Version:                config.version,
+		TargetOS:               targetOS,
+		TargetArch:             targetArch,
+		Entrypoint:             config.entrypoint,
+		WorkDir:                config.workDir,
+		OnlineServerEntrypoint: config.onlineServerEntrypoint,
+		Epoch:                  epoch,
+		Exclude:                exclude,
+		SymlinkMode:            symlinkMode,
 	}
 
 	xzExecutable := ""
@@ -259,6 +261,13 @@ func parseFlags(arguments []string, stderr io.Writer) (packConfig, error) {
 	flags.StringVar(&config.target, "target", "", "target platform as os/arch")
 	flags.StringVar(&config.entrypoint, "entry", "", "payload-relative native entrypoint")
 	flags.StringVar(&config.workDir, "workdir", "", "payload-relative working directory")
+	// GeneralsX @feature Codex 04/08/2026 Declare an optional target-native Online server sidecar in the authenticated payload.
+	flags.StringVar(
+		&config.onlineServerEntrypoint,
+		"online-server-entry",
+		"",
+		"optional payload-relative Online server entrypoint",
+	)
 	flags.StringVar(&config.product, "product", "", "bundle product identifier")
 	flags.StringVar(&config.version, "version", "", "bundle version")
 	flags.StringVar(&config.excludeFile, "exclude", "", "optional exclusion profile")
@@ -1113,12 +1122,23 @@ func removeEnvironment(environment []string, names ...string) []string {
 }
 
 func syncRegularFile(name string) error {
-	file, err := os.Open(name)
+	// GeneralsX @bugfix Codex 04/08/2026 Open Windows launchers with write access before flushing them to stable storage.
+	// FlushFileBuffers requires a writable Windows handle even when the file was
+	// just produced and closed by go build. A read-only handle returns
+	// ERROR_ACCESS_DENIED for executable files on native Windows hosts.
+	file, err := os.OpenFile(name, syncRegularFileOpenFlags(runtime.GOOS), 0)
 	if err != nil {
 		return err
 	}
 	defer file.Close()
 	return file.Sync()
+}
+
+func syncRegularFileOpenFlags(hostOS string) int {
+	if hostOS == "windows" {
+		return os.O_RDWR
+	}
+	return os.O_RDONLY
 }
 
 func bestEffortSyncDirectory(name string) {

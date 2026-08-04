@@ -17,12 +17,14 @@ Zero Hour that you legally own, such as the
 | Platform | Preset | Architecture | Status |
 |---|---|---:|---|
 | macOS | `macos-vulkan` | Apple Silicon (`arm64`) | Primary native desktop build |
-| Windows | `win32-vcpkg` | 32-bit x86 | Native build and focused Online paths validated; packaging and end-to-end gameplay remain exploratory |
+| Windows | `win32-vcpkg` | 32-bit x86 | Native build, retail-sized SFX, and headless startup through Direct3D verified on Windows; rendered gameplay remains exploratory |
 | Linux | `linux64-deploy` | 64-bit x86 | Active; see the [Linux build guide](docs/BUILD/LINUX.md) |
 
 The macOS preset requests a macOS 15 deployment target. The actual minimum OS of
 a packaged build can be raised by Homebrew or Vulkan runtime libraries, so audit
 all bundled dylibs before distributing it as a macOS 15-compatible release.
+The Linux SFX launcher itself is static, but its bundled native game currently
+requires a Vulkan-capable x86-64 system with glibc 2.38 or newer.
 
 ## Get the source
 
@@ -39,7 +41,51 @@ git submodule update --init --recursive --jobs 6
 Build products are written below `build/<preset>/`; source files are not changed
 by configuration.
 
-## Compile a default Online server into the client
+## Build a personal single-file game automatically
+
+With Go 1.25 or newer installed, the bootstrap command can clone this source
+repository and all submodules, install the target's missing build tools, install
+a private SteamCMD, download the Windows Zero Hour depot owned by your Steam
+account, build the native game, and package it as one self-extracting executable:
+
+```sh
+go run github.com/moloch--/Generals/cmd/generalsx-build@main \
+  --steam-user YOUR_STEAM_ACCOUNT
+```
+
+Run it from an empty directory or any directory outside a GeneralsX checkout;
+the default checkout is `~/GeneralsX/source`. SteamCMD prompts directly for the
+password and Steam Guard challenge—the builder has no password flag and does
+not store those secrets. On a Mac without the pinned Vulkan SDK or Rosetta 2,
+explicitly acknowledge the applicable installer licenses on the first run:
+
+```sh
+go run github.com/moloch--/Generals/cmd/generalsx-build@main \
+  --steam-user YOUR_STEAM_ACCOUNT \
+  --accept-sdk-licenses
+```
+
+From an existing checkout, use `go run ./cmd/generalsx-build`. Add
+`--with-online-server` to clone/build and embed the optional
+`generals-server` sidecar. It is not started automatically; the finished SFX
+runs it on loopback with `--sfx-server`. Use `--dry-run` to inspect the planned
+external commands first.
+
+Without `--with-online-server`, the builder does not clone, compile, package,
+or start the backend; the normal output contains only the game client and its
+runtime dependencies.
+
+The output is a CGO-free, single-file Go SFX launcher with no non-system shared
+library dependency. It contains the native game, its required runtime libraries,
+and the retail data; the launcher still uses normal operating-system libraries,
+and the C++ child uses target-native dynamic platform libraries. “Single file”
+describes the distributed SFX, not a fully static game process. Windows
+headless startup reaches Direct3D, but rendered gameplay remains exploratory.
+See the [automated SFX build guide](docs/HOWTO/AUTOMATED_SFX_BUILD.md) for
+platform requirements, flags, outputs, server operation, and legal/safety
+boundaries.
+
+## Compile a default Online endpoint into the client
 
 The standalone [`generals-server`](https://github.com/moloch--/generals-server)
 is a separate Go service. A directory such as `./generals-server` is its source
@@ -240,7 +286,6 @@ Install Visual Studio 2022 with:
 
 - Desktop development with C++
 - MSVC x86/x64 build tools
-- C++ ATL and MFC components
 - A current Windows SDK
 - CMake and Ninja
 
@@ -299,17 +344,10 @@ Outputs:
 - Zero Hour: `build\win32-vcpkg\GeneralsMD\Release\generalszh.exe`
 - Generals: `build\win32-vcpkg\Generals\Release\generalsv.exe`
 
-If the final link reports unresolved D3DX symbols, apply the temporary Release
-linker accommodation after the first configure, then run the build again:
-
-```powershell
-$d3dx = (Resolve-Path '.\build\win32-vcpkg\_deps\dx8-src\d3dx8.lib').Path
-cmake -S . -B .\build\win32-vcpkg `
-  "-DCMAKE_EXE_LINKER_FLAGS_RELEASE=/INCREMENTAL:NO $d3dx"
-```
-
-This workaround is not a substitute for fixing the dependency target and
-should be removed once that CMake cycle is corrected.
+The CMake dependency target imports the fetched DX8 compatibility archive and
+links its D3DX implementation into the Release executable. No separate
+`d3dx8d.dll` or manual linker-flag workaround is required for this native MSVC
+path.
 
 ### 3. Prepare a runtime directory
 
@@ -329,9 +367,9 @@ Install the Microsoft Visual C++ 2015-2022 x86 Redistributable, or stage the x86
 `MSVCP140.dll`, `MSVCP140_ATOMIC_WAIT.dll`, and `VCRUNTIME140.dll` beside the
 executable. Curl uses Windows Schannel, so OpenSSL DLLs are not required.
 
-The native build and focused Winsock/Schannel paths have been exercised, but
-Windows packaging, end-to-end gameplay validation, and CI are still in
-progress.
+The native build, focused Winsock/Schannel paths, and retail-sized SFX packaging
+have been exercised on Windows. Startup, end-to-end gameplay validation, and CI
+are still in progress.
 
 ## Validate Online endpoint behavior
 
@@ -356,6 +394,7 @@ must use the compiled value.
 
 ## More documentation
 
+- [Automated source, asset, and SFX builder](docs/HOWTO/AUTOMATED_SFX_BUILD.md)
 - [Online multiplayer and server deployment](docs/HOWTO/ONLINE_MULTIPLAYER.md)
 - [Self-extracting executable and macOS app packaging](docs/HOWTO/BUILD_SELF_EXTRACTING_GAME.md)
 - [Linux build guide](docs/BUILD/LINUX.md)

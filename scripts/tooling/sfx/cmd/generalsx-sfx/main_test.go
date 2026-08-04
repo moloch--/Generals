@@ -59,6 +59,238 @@ func TestParseActionRejectsInvalidExtract(t *testing.T) {
 	}
 }
 
+// GeneralsX @feature Codex 04/08/2026 Preserve Online server CLI arguments exactly while allowing one explicit separator.
+func TestParseActionForwardsOnlineServerArguments(t *testing.T) {
+	tests := []struct {
+		name      string
+		arguments []string
+		want      []string
+	}{
+		{name: "safe defaults requested", arguments: []string{"--sfx-server"}},
+		{
+			name:      "direct arguments",
+			arguments: []string{"--sfx-server", "--control-listen", "0.0.0.0:29900", "literal;value"},
+			want:      []string{"--control-listen", "0.0.0.0:29900", "literal;value"},
+		},
+		{
+			name:      "separator",
+			arguments: []string{"--sfx-server", "--", "--help"},
+			want:      []string{"--help"},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got, err := parseAction(test.arguments)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.kind != actionServer {
+				t.Fatalf("kind = %v, want Online server", got.kind)
+			}
+			if !reflect.DeepEqual(got.serverArgs, test.want) {
+				t.Fatalf("server args = %#v, want %#v", got.serverArgs, test.want)
+			}
+		})
+	}
+}
+
+func TestOnlineServerHelpAndInfo(t *testing.T) {
+	var help bytes.Buffer
+	writeHelp(&help)
+	for _, expected := range []string{
+		"--sfx-server [--] [SERVER_ARGUMENT...]",
+		"listeners bind to loopback",
+		"Other server arguments do not disable",
+	} {
+		if !strings.Contains(help.String(), expected) {
+			t.Errorf("help is missing %q:\n%s", expected, help.String())
+		}
+	}
+
+	withoutServer := makeTestBundle(t)
+	var info bytes.Buffer
+	writeInfo(&info, withoutServer, "/cache")
+	if !strings.Contains(info.String(), "Online server:       <not included>") {
+		t.Fatalf("legacy info does not report an absent Online server:\n%s", info.String())
+	}
+
+	withServer := makeTestBundleWithOnlineServer(t)
+	info.Reset()
+	writeInfo(&info, withServer, "/cache")
+	if !strings.Contains(
+		info.String(),
+		"Online server:       "+withServer.manifest.OnlineServerEntrypoint,
+	) {
+		t.Fatalf("Online server info is missing its entrypoint:\n%s", info.String())
+	}
+}
+
+func TestPrepareOnlineServerCommandUsesSafeDefaultsAndPrivateState(t *testing.T) {
+	embedded := makeTestBundleWithOnlineServer(t)
+	runtimeRoot := filepath.Join(t.TempDir(), "runtime")
+	if err := extractEmbeddedPayload(context.Background(), embedded, runtimeRoot); err != nil {
+		t.Fatal(err)
+	}
+	manager, err := cache.New(cache.Options{Root: filepath.Join(t.TempDir(), "cache")})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	command, err := prepareOnlineServerCommand(
+		context.Background(),
+		manager,
+		runtimeRoot,
+		embedded.manifest,
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("prepareOnlineServerCommand() error = %v", err)
+	}
+	stateDir := filepath.Join(
+		manager.Root(),
+		embedded.manifest.Product,
+		".runtime-state",
+		"online-server",
+	)
+	resolvedStateDir, err := filepath.EvalSymlinks(stateDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if command.Dir != resolvedStateDir {
+		t.Fatalf("command.Dir = %q, want %q", command.Dir, resolvedStateDir)
+	}
+	wantArguments := []string{
+		"--control-listen", "127.0.0.1:29900",
+		"--relay-listen", "127.0.0.1:27901",
+		"--health-listen", "127.0.0.1:8080",
+		"--public-host", "127.0.0.1",
+		"--data-file", "profiles.db",
+	}
+	if !reflect.DeepEqual(command.Args[1:], wantArguments) {
+		t.Fatalf("safe default arguments = %#v, want %#v", command.Args[1:], wantArguments)
+	}
+	environment := environmentValues(command.Env)
+	if environment["PWD"] != resolvedStateDir {
+		t.Fatalf("PWD = %q, want %q", environment["PWD"], resolvedStateDir)
+	}
+	if strings.HasPrefix(resolvedStateDir, runtimeRoot+string(filepath.Separator)) {
+		t.Fatalf("Online server state %q is inside payload %q", resolvedStateDir, runtimeRoot)
+	}
+
+	customArguments := []string{
+		"--control-listen", "0.0.0.0:29900",
+		"--data-file", "custom.db",
+		"literal;value",
+	}
+	custom, err := prepareOnlineServerCommand(
+		context.Background(),
+		manager,
+		runtimeRoot,
+		embedded.manifest,
+		customArguments,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantCustomArguments := []string{
+		"--relay-listen", "127.0.0.1:27901",
+		"--health-listen", "127.0.0.1:8080",
+		"--public-host", "127.0.0.1",
+		"--control-listen", "0.0.0.0:29900",
+		"--data-file", "custom.db",
+		"literal;value",
+	}
+	if !reflect.DeepEqual(custom.Args[1:], wantCustomArguments) {
+		t.Fatalf("custom server arguments = %#v, want %#v", custom.Args[1:], wantCustomArguments)
+	}
+}
+
+// GeneralsX @bugfix Codex 04/08/2026 Keep every unspecified embedded-server safety default when custom flags are present.
+func TestOnlineServerArgumentsMergesSafetyDefaultsPerFlag(t *testing.T) {
+	allDefaults := []string{
+		"--control-listen", "127.0.0.1:29900",
+		"--relay-listen", "127.0.0.1:27901",
+		"--health-listen", "127.0.0.1:8080",
+		"--public-host", "127.0.0.1",
+		"--data-file", "profiles.db",
+	}
+	tests := []struct {
+		name      string
+		requested []string
+		want      []string
+	}{
+		{
+			name:      "unrelated custom argument retains every default",
+			requested: []string{"--max-online-players", "16"},
+			want:      append(append([]string(nil), allDefaults...), "--max-online-players", "16"),
+		},
+		{
+			name: "split overrides replace only their defaults",
+			requested: []string{
+				"--control-listen", "0.0.0.0:30000",
+				"--data-file", "custom.db",
+			},
+			want: []string{
+				"--relay-listen", "127.0.0.1:27901",
+				"--health-listen", "127.0.0.1:8080",
+				"--public-host", "127.0.0.1",
+				"--control-listen", "0.0.0.0:30000",
+				"--data-file", "custom.db",
+			},
+		},
+		{
+			name: "equals overrides replace only their defaults",
+			requested: []string{
+				"--relay-listen=0.0.0.0:27901",
+				"--health-listen=0.0.0.0:8080",
+				"--public-host=online.example.test",
+			},
+			want: []string{
+				"--control-listen", "127.0.0.1:29900",
+				"--data-file", "profiles.db",
+				"--relay-listen=0.0.0.0:27901",
+				"--health-listen=0.0.0.0:8080",
+				"--public-host=online.example.test",
+			},
+		},
+		{
+			name:      "separator prevents a positional token from disabling a default",
+			requested: []string{"--", "--control-listen", "0.0.0.0:30000"},
+			want:      append(append([]string(nil), allDefaults...), "--", "--control-listen", "0.0.0.0:30000"),
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			requestedBefore := append([]string(nil), test.requested...)
+			got := onlineServerArguments(test.requested)
+			if !reflect.DeepEqual(got, test.want) {
+				t.Fatalf("onlineServerArguments() = %#v, want %#v", got, test.want)
+			}
+			if !reflect.DeepEqual(test.requested, requestedBefore) {
+				t.Fatalf("onlineServerArguments() mutated input: got %#v, want %#v", test.requested, requestedBefore)
+			}
+		})
+	}
+}
+
+func TestPrepareOnlineServerCommandRequiresManifestEntrypoint(t *testing.T) {
+	manager, err := cache.New(cache.Options{Root: filepath.Join(t.TempDir(), "cache")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = prepareOnlineServerCommand(
+		context.Background(),
+		manager,
+		t.TempDir(),
+		bundle.Manifest{Product: "fixture"},
+		nil,
+	)
+	if err == nil || !strings.Contains(err.Error(), "does not declare") {
+		t.Fatalf("missing Online server entrypoint error = %v", err)
+	}
+}
+
 func TestExtractEmbeddedPayloadAndValidateRuntime(t *testing.T) {
 	embedded := makeTestBundle(t)
 	destination := filepath.Join(t.TempDir(), "runtime")
@@ -443,6 +675,14 @@ func containsString(values []string, expected string) bool {
 }
 
 func makeTestBundle(t *testing.T) embeddedBundle {
+	return makeTestBundleConfigured(t, false)
+}
+
+func makeTestBundleWithOnlineServer(t *testing.T) embeddedBundle {
+	return makeTestBundleConfigured(t, true)
+}
+
+func makeTestBundleConfigured(t *testing.T, includeOnlineServer bool) embeddedBundle {
 	t.Helper()
 
 	source := t.TempDir()
@@ -455,6 +695,20 @@ func makeTestBundle(t *testing.T) embeddedBundle {
 	if err := os.WriteFile(filepath.Join(source, "asset.big"), []byte("fixture asset"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	onlineServerEntrypoint := ""
+	if includeOnlineServer {
+		onlineServerEntrypoint = "online-server/generals-server"
+		if runtime.GOOS == "windows" {
+			onlineServerEntrypoint += ".exe"
+		}
+		serverPath := filepath.Join(source, filepath.FromSlash(onlineServerEntrypoint))
+		if err := os.MkdirAll(filepath.Dir(serverPath), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(serverPath, []byte("native server placeholder"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
 
 	var compressed bytes.Buffer
 	xzWriter, err := xz.NewWriter(&compressed)
@@ -462,13 +716,14 @@ func makeTestBundle(t *testing.T) embeddedBundle {
 		t.Fatal(err)
 	}
 	manifest, err := bundle.WriteTar(source, xzWriter, bundle.PackOptions{
-		Product:    "GeneralsXZH-test",
-		Version:    "test",
-		TargetOS:   runtime.GOOS,
-		TargetArch: runtime.GOARCH,
-		Entrypoint: "bin/game",
-		WorkDir:    "bin",
-		Epoch:      time.Unix(0, 0),
+		Product:                "GeneralsXZH-test",
+		Version:                "test",
+		TargetOS:               runtime.GOOS,
+		TargetArch:             runtime.GOARCH,
+		Entrypoint:             "bin/game",
+		WorkDir:                "bin",
+		OnlineServerEntrypoint: onlineServerEntrypoint,
+		Epoch:                  time.Unix(0, 0),
 	})
 	if err != nil {
 		t.Fatal(err)

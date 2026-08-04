@@ -46,8 +46,10 @@ host OS or architecture.
 
 ## Before You Begin
 
-The packer does not download retail assets and does not establish a right to
-redistribute them.
+The low-level packer does not download retail assets and does not establish a
+right to redistribute them. The higher-level
+[automated builder](AUTOMATED_SFX_BUILD.md) can invoke SteamCMD for an account
+that owns Zero Hour before calling this packer.
 
 - Use a legitimate Command & Conquer: Generals Zero Hour installation that
   you own.
@@ -64,11 +66,13 @@ obsolete runtime files, but they are not a license audit.
 For macOS/ARM64, install:
 
 - Xcode Command Line Tools and the normal GeneralsX build dependencies;
-- Go 1.22 or newer;
+- Go 1.25 or newer;
 - XZ (`brew install xz`);
 - `unzip`.
 
-The current macOS native binary declares macOS 15.0 as its minimum OS version.
+The current macOS native binary declares macOS 15.0, but staged Homebrew or
+Vulkan dylibs can raise the effective minimum to the build host's macOS version;
+audit every bundled dylib before claiming compatibility with older releases.
 The current Linux artifact requires an x86_64 host with glibc 2.38 or newer
 (an Ubuntu 24.04-class userspace) plus a native display and Vulkan-capable
 GPU/driver stack. Bundled application libraries do not make the SFX hermetic
@@ -208,6 +212,7 @@ the same name as an SFX option, put it after `--`:
 | `--sfx-extract DIRECTORY` | Verify and extract to a new destination; the destination must not already exist |
 | `--sfx-purge-cache` | Remove only this artifact's current content-addressed cache entry |
 | `--sfx-notices` | Print embedded third-party license notices |
+| `--sfx-server [--] [SERVER_ARGUMENT...]` | Run the optional embedded Online backend; each unspecified listener, advertised-host, and data-file option retains its contained default |
 | `-- GAME_ARGUMENT...` | Treat everything after `--` as game arguments |
 
 `--sfx-help` and `--sfx-notices` work without loading a payload.
@@ -252,8 +257,8 @@ the default environment, the Unix platform filesystem resolves relative reads
 against the immutable asset root before normal BIG archives and routes
 relative writes to `.runtime-state`; writable state therefore cannot override
 packaged assets.
-Windows retains the payload's manifest working directory as its process current
-directory for compatibility, while DXVK state is directed to `.runtime-state`.
+Windows also uses `.runtime-state` as the process current directory while
+keeping executable and DLL discovery rooted in the verified payload.
 Use the normal unpacked development build, not the SFX, for editor workflows
 that rely on writing and then reading relative temporary files.
 
@@ -417,20 +422,22 @@ ending in `.exe`. Packaging can cross-build on any supported Go host; executing
 the recommended wrapper requires 64-bit Windows. The 64-bit wrapper can start
 its embedded PE32 child and provides the address space needed for a
 retail-sized `go:embed` payload. `windows/386` also cross-builds for small
-payloads. The stage may not contain symlinks. Neither choice makes the current
-game runtime ready: it still imports `d3dx8d.dll`, and its generated Bink and
-Miles DLLs are deliberate null implementations.
-An Online/TLS-capable game built with `win32-vcpkg` additionally requires the
-x86 Release `libcurl.dll`, `zlib1.dll`, `MSVCP140.dll`,
+payloads. The stage may not contain symlinks. Neither choice alone makes the
+game a supported Windows release. For the native `win32-vcpkg` path, CMake
+links the fetched static D3DX archive, while the packager requires and preserves
+the user's retail `binkw32.dll` and `mss32.dll`; it must never substitute the
+generated null implementations. An Online/TLS-capable game additionally
+requires the x86 Release `libcurl.dll`, `zlib1.dll`, `MSVCP140.dll`,
 `MSVCP140_ATOMIC_WAIT.dll`, and `VCRUNTIME140.dll` in a self-contained stage
 beside `generalszh.exe`; curl uses Schannel and does not require OpenSSL DLLs.
-They export all names the current game imports, but audio/video behavior is
-unimplemented and compatibility with retail DLL implementations is
-unvalidated. Do not distribute or describe the Windows artifact as a working
-game build. Windows also retains the payload as its process working directory,
-so remaining legacy relative writes can invalidate the immutable cache; that
-routing must be completed and tested with the native runtime before Windows
-gameplay support is claimed.
+The integrated Windows script resolves and validates this full closure. A
+retail-sized native artifact has passed complete extraction and file-hash
+verification on Windows. A headless launch also loaded the retail libraries and
+language data, created Direct3D8, and initialized WW3D before the SSH session's
+expected no-display failure. Windows contains the process current directory and
+DXVK state under `.runtime-state` while resolving the executable and DLL closure
+from the verified payload; rendered gameplay still needs complete validation
+before Windows support is claimed.
 
 ## Deterministic and Reproducible Inputs
 
