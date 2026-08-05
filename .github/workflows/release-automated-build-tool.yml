@@ -174,7 +174,7 @@ jobs:
         run: |
           set -euo pipefail
           test -n "${HEROUI_AUTH_TOKEN}"
-          npm ci --strict-allow-scripts --no-audit --no-fund
+          npm ci --ignore-scripts --strict-allow-scripts --no-audit --no-fund
           npx --no-install heroui-pro install react \
             --yes \
             --skip-peers \
