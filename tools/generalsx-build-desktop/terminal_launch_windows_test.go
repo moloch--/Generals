@@ -61,4 +61,8 @@ func TestWindowsInteractiveCommandStartsSuspendedInKillOnCloseJob(t *testing.T) 
 	if limits.BasicLimitInformation.LimitFlags&windows.JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE == 0 {
 		t.Fatalf("interactive Job Object limit flags = %#x", limits.BasicLimitInformation.LimitFlags)
 	}
+	access := windowsTerminalJobAssignmentProcessAccess()
+	if access&windows.PROCESS_SET_QUOTA == 0 || access&windows.PROCESS_TERMINATE == 0 {
+		t.Fatalf("interactive job assignment process access = %#x", access)
+	}
 }

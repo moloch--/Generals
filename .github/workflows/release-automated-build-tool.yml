@@ -345,13 +345,17 @@ jobs:
             printf 'expected:\n%s\nactual:\n%s\n' "${expected_build_info}" "${actual_build_info}"
             exit 1
           fi
-          go version "${desktop}" | grep -F 'darwin/arm64'
+          desktop_metadata="$(go version -m "${desktop}")"
+          printf '%s\n' "${desktop_metadata}"
+          grep -F 'GOOS=darwin' <<< "${desktop_metadata}"
+          grep -F 'GOARCH=arm64' <<< "${desktop_metadata}"
 
           metadata="$(go version -m "${RUNNER_TEMP}/generalsx-build")"
           printf '%s\n' "${metadata}"
           grep -F "vcs.revision=${SOURCE_COMMIT}" <<< "${metadata}"
           grep -F 'vcs.modified=false' <<< "${metadata}"
-          go version "${RUNNER_TEMP}/generalsx-build" | grep -F 'darwin/arm64'
+          grep -F 'GOOS=darwin' <<< "${metadata}"
+          grep -F 'GOARCH=arm64' <<< "${metadata}"
 
       - name: Build Linux desktop and headless binaries
         if: matrix.platform == 'linux'
@@ -389,13 +393,17 @@ jobs:
             printf 'expected:\n%s\nactual:\n%s\n' "${expected_build_info}" "${actual_build_info}"
             exit 1
           fi
-          go version "${desktop}" | grep -F 'linux/amd64'
+          desktop_metadata="$(go version -m "${desktop}")"
+          printf '%s\n' "${desktop_metadata}"
+          grep -F 'GOOS=linux' <<< "${desktop_metadata}"
+          grep -F 'GOARCH=amd64' <<< "${desktop_metadata}"
 
           metadata="$(go version -m "${RUNNER_TEMP}/generalsx-build")"
           printf '%s\n' "${metadata}"
           grep -F "vcs.revision=${SOURCE_COMMIT}" <<< "${metadata}"
           grep -F 'vcs.modified=false' <<< "${metadata}"
-          go version "${RUNNER_TEMP}/generalsx-build" | grep -F 'linux/amd64'
+          grep -F 'GOOS=linux' <<< "${metadata}"
+          grep -F 'GOARCH=amd64' <<< "${metadata}"
           ldd "${desktop}" | grep -F 'libwebkit2gtk-4.1.so'
 
       - name: Build Windows desktop and headless binaries
@@ -443,8 +451,10 @@ jobs:
           if (Compare-Object $expectedBuildInfo $buildInfo) {
             throw 'Windows desktop provenance does not match the release source.'
           }
-          $desktopTarget = go version $desktop | Out-String
-          if (-not $desktopTarget.Contains('windows/amd64')) {
+          $desktopMetadata = go version -m $desktop | Out-String
+          Write-Host $desktopMetadata
+          if (-not $desktopMetadata.Contains('GOOS=windows') -or
+              -not $desktopMetadata.Contains('GOARCH=amd64')) {
             throw "$desktop is not a windows/amd64 executable"
           }
 
@@ -457,8 +467,8 @@ jobs:
           if (-not $metadata.Contains('vcs.modified=false')) {
             throw "$headless was built from a modified worktree"
           }
-          $headlessTarget = go version $headless | Out-String
-          if (-not $headlessTarget.Contains('windows/amd64')) {
+          if (-not $metadata.Contains('GOOS=windows') -or
+              -not $metadata.Contains('GOARCH=amd64')) {
             throw "$headless is not a windows/amd64 executable"
           }
 

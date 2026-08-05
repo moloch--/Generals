@@ -68,17 +68,29 @@ func configureSuspendedProcess(command *exec.Cmd) {
 	command.SysProcAttr.CreationFlags |= windows.CREATE_SUSPENDED
 }
 
+// GeneralsX @bugfix Codex 05/08/2026 Assign suspended children without the Go 1.26-only os.Process handle API.
 func assignProcessToJob(command *exec.Cmd, job windows.Handle) error {
-	var assignErr error
-	if err := command.Process.WithHandle(func(handle uintptr) {
-		assignErr = windows.AssignProcessToJobObject(job, windows.Handle(handle))
-	}); err != nil {
-		return fmt.Errorf("access external process handle: %w", err)
+	processHandle, err := windows.OpenProcess(
+		windowsJobAssignmentProcessAccess(),
+		false,
+		uint32(command.Process.Pid),
+	)
+	if err != nil {
+		return fmt.Errorf("open external process for job assignment: %w", err)
 	}
+	assignErr := windows.AssignProcessToJobObject(job, processHandle)
+	closeErr := windows.CloseHandle(processHandle)
 	if assignErr != nil {
 		return fmt.Errorf("assign external process to job: %w", assignErr)
 	}
+	if closeErr != nil {
+		return fmt.Errorf("close external process assignment handle: %w", closeErr)
+	}
 	return nil
+}
+
+func windowsJobAssignmentProcessAccess() uint32 {
+	return windows.PROCESS_SET_QUOTA | windows.PROCESS_TERMINATE
 }
 
 func resumeProcess(processID int) error {

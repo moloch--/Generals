@@ -45,16 +45,25 @@ func startTerminalProcess(command *exec.Cmd) (*terminalProcess, error) {
 	if err := command.Start(); err != nil {
 		return nil, err
 	}
-	var assignErr error
-	if err := command.Process.WithHandle(func(handle uintptr) {
-		assignErr = windows.AssignProcessToJobObject(job, windows.Handle(handle))
-	}); err != nil {
+	// GeneralsX @bugfix Codex 05/08/2026 Assign suspended terminals without the Go 1.26-only os.Process handle API.
+	processHandle, err := windows.OpenProcess(
+		windowsTerminalJobAssignmentProcessAccess(),
+		false,
+		uint32(command.Process.Pid),
+	)
+	if err != nil {
 		abortTerminalProcess(command, job)
-		return nil, fmt.Errorf("access interactive process handle: %w", err)
+		return nil, fmt.Errorf("open interactive process for job assignment: %w", err)
 	}
+	assignErr := windows.AssignProcessToJobObject(job, processHandle)
+	closeErr := windows.CloseHandle(processHandle)
 	if assignErr != nil {
 		abortTerminalProcess(command, job)
 		return nil, fmt.Errorf("assign interactive process to job: %w", assignErr)
+	}
+	if closeErr != nil {
+		abortTerminalProcess(command, job)
+		return nil, fmt.Errorf("close interactive process assignment handle: %w", closeErr)
 	}
 	if err := resumeTerminalProcess(command.Process.Pid); err != nil {
 		abortTerminalProcess(command, job)
@@ -72,6 +81,10 @@ func windowsTerminalJobLimits() windows.JOBOBJECT_EXTENDED_LIMIT_INFORMATION {
 
 func windowsTerminalProcessCreationFlags() uint32 {
 	return windows.CREATE_NEW_PROCESS_GROUP | windows.CREATE_SUSPENDED
+}
+
+func windowsTerminalJobAssignmentProcessAccess() uint32 {
+	return windows.PROCESS_SET_QUOTA | windows.PROCESS_TERMINATE
 }
 
 func resumeTerminalProcess(processID int) error {

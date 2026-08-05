@@ -21,3 +21,11 @@ func TestConfigureSuspendedProcessPreservesCreationFlags(t *testing.T) {
 		t.Fatalf("creation flags %#x discarded existing flags", command.SysProcAttr.CreationFlags)
 	}
 }
+
+func TestJobAssignmentProcessAccessUsesRequiredRights(t *testing.T) {
+	t.Parallel()
+	access := windowsJobAssignmentProcessAccess()
+	if access&windows.PROCESS_SET_QUOTA == 0 || access&windows.PROCESS_TERMINATE == 0 {
+		t.Fatalf("job assignment process access = %#x", access)
+	}
+}
