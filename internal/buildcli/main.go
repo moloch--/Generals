@@ -13,15 +13,31 @@ import (
 )
 
 type application struct {
-	cfg      config
-	runner   runner
-	hostOS   string
-	hostArch string
-	http     *http.Client
+	cfg               config
+	runner            runner
+	hostOS            string
+	hostArch          string
+	http              *http.Client
+	reporter          Reporter
+	interactiveRunner InteractiveCommandRunner
 }
 
 // Main runs the build command and returns a process exit code.
 func Main(ctx context.Context, arguments []string, stdin io.Reader, stdout, stderr io.Writer) int {
+	return MainWithReporter(ctx, arguments, stdin, stdout, stderr, nil)
+}
+
+// GeneralsX @feature Codex 05/08/2026 Allow graphical frontends to observe builds without changing terminal output.
+// MainWithReporter runs the build command, reports structured progress, and
+// returns the same process exit codes as Main.
+func MainWithReporter(ctx context.Context, arguments []string, stdin io.Reader, stdout, stderr io.Writer, reporter Reporter) int {
+	return MainWithOptions(ctx, arguments, stdin, stdout, stderr, RunOptions{Reporter: reporter})
+}
+
+// GeneralsX @feature Codex 05/08/2026 Let desktop frontends provide a real terminal for private interactive prompts.
+// MainWithOptions runs the command with optional progress reporting and an
+// interactive-command runner while preserving Main's arguments and exit codes.
+func MainWithOptions(ctx context.Context, arguments []string, stdin io.Reader, stdout, stderr io.Writer, options RunOptions) int {
 	cfg, err := parseConfig(arguments, stderr)
 	if err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -38,9 +54,11 @@ func Main(ctx context.Context, arguments []string, stdin io.Reader, stdout, stde
 			stdout: stdout,
 			stderr: stderr,
 		},
-		hostOS:   runtime.GOOS,
-		hostArch: runtime.GOARCH,
-		http:     http.DefaultClient,
+		hostOS:            runtime.GOOS,
+		hostArch:          runtime.GOARCH,
+		http:              http.DefaultClient,
+		reporter:          options.Reporter,
+		interactiveRunner: options.InteractiveRunner,
 	}
 	if err := app.run(ctx); err != nil {
 		fmt.Fprintf(stderr, "generalsx-build: %v\n", err)
@@ -54,6 +72,7 @@ func (app application) run(ctx context.Context) error {
 	if ctx == nil {
 		return errors.New("build context is nil")
 	}
+	reportProgress(app.reporter, ProgressPhasePreflight, "Validating the build host and configuration")
 	if err := app.validateHostTarget(); err != nil {
 		return err
 	}
@@ -70,6 +89,7 @@ func (app application) run(ctx context.Context) error {
 			return err
 		}
 	}
+	reportProgress(app.reporter, ProgressPhaseSource, "Preparing the GeneralsX source checkout")
 	gitPath, err := app.ensureGit(ctx)
 	if err != nil {
 		return err
@@ -82,21 +102,25 @@ func (app application) run(ctx context.Context) error {
 			return err
 		}
 	}
+	reportProgress(app.reporter, ProgressPhaseToolchain, "Preparing the target build toolchain")
 	buildEnv, err := app.bootstrap(ctx, gitPath)
 	if err != nil {
 		return err
 	}
+	reportProgress(app.reporter, ProgressPhaseAssets, "Preparing owned Zero Hour retail assets")
 	if err := app.acquireAssets(ctx); err != nil {
 		return err
 	}
 
 	serverBinary := ""
+	reportProgress(app.reporter, ProgressPhaseOnlineServer, "Preparing the optional Online server")
 	if app.cfg.withOnlineServer {
 		serverBinary, err = app.buildOnlineServer(ctx, buildEnv)
 		if err != nil {
 			return err
 		}
 	}
+	reportProgress(app.reporter, ProgressPhaseBuild, "Building the self-extracting game executable")
 	if err := app.buildSFX(ctx, buildEnv, serverBinary); err != nil {
 		return err
 	}
@@ -112,6 +136,7 @@ func (app application) run(ctx context.Context) error {
 	if app.cfg.withOnlineServer {
 		fmt.Fprintln(app.runner.stdout, "Bundled backend: launch with --sfx-server; it is never started or exposed automatically.")
 	}
+	reportProgress(app.reporter, ProgressPhaseComplete, "Automated build complete")
 	return nil
 }
 

@@ -12,6 +12,72 @@ included.** To run a build, provide the data files from a copy of Generals or
 Zero Hour that you legally own, such as the
 [Steam release](https://store.steampowered.com/app/2732960/).
 
+## Preferred: use the Automated Build Tool
+
+The preferred build path is the GeneralsX **Automated Build Tool**. Tagged
+[`vX.Y.Z` releases](https://github.com/moloch--/Generals/releases) provide a
+native desktop app for Apple Silicon macOS, AMD64 Linux, and AMD64 Windows.
+Open it normally for a guided four-step build: choose the host-supported target,
+select or download your owned game files, configure the output, and review the
+plan before anything changes.
+
+If the selected game files need to be downloaded, the app opens SteamCMD in a
+real terminal. SteamCMD prompts there for the password and Steam Guard
+challenge; the GUI has no password or challenge field and never receives or
+stores those secrets. A missing host dependency that needs administrator
+approval also opens its installer in a native terminal; the guided build
+resumes automatically after that command finishes.
+
+The dependency-light terminal bootstrap remains available with Go 1.25 or
+newer. It can clone this source repository and all submodules, install the
+target's missing build tools, install a private SteamCMD, download the Windows
+Zero Hour depot owned by your Steam account, build the native game client, and
+package it as one self-extracting executable:
+
+```sh
+go run github.com/moloch--/Generals/cmd/generalsx-build@main \
+  --headless \
+  --steam-user YOUR_STEAM_ACCOUNT
+```
+
+Run it from an empty directory or any directory outside a GeneralsX checkout;
+the default checkout is `~/GeneralsX/source`. SteamCMD prompts directly for the
+password and Steam Guard challenge—the builder has no password flag and does
+not store those secrets. On a Mac without the pinned Vulkan SDK or Rosetta 2,
+explicitly acknowledge the applicable installer licenses on the first run:
+
+```sh
+go run github.com/moloch--/Generals/cmd/generalsx-build@main \
+  --headless \
+  --steam-user YOUR_STEAM_ACCOUNT \
+  --accept-sdk-licenses
+```
+
+From an existing checkout, use
+`go run ./cmd/generalsx-build --headless`. A downloaded desktop executable also
+accepts `--headless` and all of the same flags. Add `--with-online-server` to
+clone/build and embed the optional
+`generals-server` sidecar. It is not started automatically; the finished SFX
+runs it on loopback with `--sfx-server`. Use `--dry-run` to inspect the planned
+external commands first.
+
+Without `--with-online-server`, the builder does not clone, compile, package,
+or start the backend; the normal output contains only the game client and its
+runtime dependencies.
+
+The produced game output is a CGO-free, single-file Go SFX launcher with no
+non-system shared-library dependency. It contains the native game, its required
+runtime libraries, and the retail data; the launcher still uses normal
+operating-system libraries, and the C++ child uses target-native dynamic
+platform libraries. “Single file” describes the distributed SFX, not a fully
+static game process. The desktop build tool itself uses the host's native web
+view; release archives also include the dependency-light headless companion.
+Windows headless startup reaches Direct3D, but rendered gameplay remains
+exploratory.
+See the [automated SFX build guide](docs/HOWTO/AUTOMATED_SFX_BUILD.md) for
+platform requirements, flags, outputs, server operation, and legal/safety
+boundaries.
+
 ## Platform status
 
 | Platform | Preset | Architecture | Status |
@@ -26,10 +92,10 @@ all bundled dylibs before distributing it as a macOS 15-compatible release.
 The Linux SFX launcher itself is static, but its bundled native game currently
 requires a Vulkan-capable x86-64 system with glibc 2.38 or newer.
 
-## Get the source
+## Get the source manually
 
-Clone recursively so that the port's reference and platform dependencies are
-available:
+For the existing platform-specific workflows below, clone recursively so that
+the port's reference and platform dependencies are available:
 
 ```sh
 git clone --recursive https://github.com/moloch--/Generals.git GeneralsX
@@ -40,50 +106,6 @@ git submodule update --init --recursive --jobs 6
 
 Build products are written below `build/<preset>/`; source files are not changed
 by configuration.
-
-## Build a personal single-file game automatically
-
-With Go 1.25 or newer installed, the bootstrap command can clone this source
-repository and all submodules, install the target's missing build tools, install
-a private SteamCMD, download the Windows Zero Hour depot owned by your Steam
-account, build the native game, and package it as one self-extracting executable:
-
-```sh
-go run github.com/moloch--/Generals/cmd/generalsx-build@main \
-  --steam-user YOUR_STEAM_ACCOUNT
-```
-
-Run it from an empty directory or any directory outside a GeneralsX checkout;
-the default checkout is `~/GeneralsX/source`. SteamCMD prompts directly for the
-password and Steam Guard challenge—the builder has no password flag and does
-not store those secrets. On a Mac without the pinned Vulkan SDK or Rosetta 2,
-explicitly acknowledge the applicable installer licenses on the first run:
-
-```sh
-go run github.com/moloch--/Generals/cmd/generalsx-build@main \
-  --steam-user YOUR_STEAM_ACCOUNT \
-  --accept-sdk-licenses
-```
-
-From an existing checkout, use `go run ./cmd/generalsx-build`. Add
-`--with-online-server` to clone/build and embed the optional
-`generals-server` sidecar. It is not started automatically; the finished SFX
-runs it on loopback with `--sfx-server`. Use `--dry-run` to inspect the planned
-external commands first.
-
-Without `--with-online-server`, the builder does not clone, compile, package,
-or start the backend; the normal output contains only the game client and its
-runtime dependencies.
-
-The output is a CGO-free, single-file Go SFX launcher with no non-system shared
-library dependency. It contains the native game, its required runtime libraries,
-and the retail data; the launcher still uses normal operating-system libraries,
-and the C++ child uses target-native dynamic platform libraries. “Single file”
-describes the distributed SFX, not a fully static game process. Windows
-headless startup reaches Direct3D, but rendered gameplay remains exploratory.
-See the [automated SFX build guide](docs/HOWTO/AUTOMATED_SFX_BUILD.md) for
-platform requirements, flags, outputs, server operation, and legal/safety
-boundaries.
 
 ## Compile a default Online endpoint into the client
 

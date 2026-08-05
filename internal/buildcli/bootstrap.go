@@ -206,10 +206,10 @@ func (app application) ensureHomebrew(ctx context.Context) (string, error) {
 	} else if err := downloadFile(ctx, app.http, homebrewInstallURL, installer, ""); err != nil {
 		return "", err
 	}
-	if err := app.runner.run(ctx, command{
+	if err := app.runInteractive(ctx, command{
 		name: "/bin/bash",
 		args: []string{installer},
-	}); err != nil {
+	}, InteractiveDependencyInstallation); err != nil {
 		return "", err
 	}
 	if app.cfg.dryRun {
@@ -352,7 +352,7 @@ func (app application) bootstrapLinux(ctx context.Context) (map[string]string, e
 			if err != nil {
 				return nil, err
 			}
-			if err := app.runner.run(ctx, command{name: brew, args: []string{"install", "--cask", "docker"}}); err != nil {
+			if err := app.runInteractive(ctx, command{name: brew, args: []string{"install", "--cask", "docker"}}, InteractiveDependencyInstallation); err != nil {
 				return nil, err
 			}
 			if err := app.runner.run(ctx, command{name: "open", args: []string{"-a", "Docker"}}); err != nil {
@@ -373,12 +373,12 @@ func (app application) bootstrapLinux(ctx context.Context) (map[string]string, e
 				return nil, err
 			}
 			steamRuntimePlanned = steamRuntimeNeeded
-			if err := app.runner.run(ctx, command{name: "sudo", args: []string{"systemctl", "enable", "--now", "docker"}}); err != nil {
+			if err := app.runInteractive(ctx, command{name: "sudo", args: []string{"systemctl", "enable", "--now", "docker"}}, InteractiveDependencyInstallation); err != nil {
 				return nil, err
 			}
 			user := os.Getenv("USER")
 			if user != "" {
-				if err := app.runner.run(ctx, command{name: "sudo", args: []string{"usermod", "-aG", "docker", user}}); err != nil {
+				if err := app.runInteractive(ctx, command{name: "sudo", args: []string{"usermod", "-aG", "docker", user}}, InteractiveDependencyInstallation); err != nil {
 					return nil, err
 				}
 			}
@@ -498,7 +498,7 @@ func (app application) installLinuxPackages(ctx context.Context, generic []strin
 			}
 		}
 		if candidate.name == "apt-get" {
-			if err := app.runner.run(ctx, command{name: "sudo", args: []string{"apt-get", "update"}}); err != nil {
+			if err := app.runInteractive(ctx, command{name: "sudo", args: []string{"apt-get", "update"}}, InteractiveDependencyInstallation); err != nil {
 				return err
 			}
 		}
@@ -512,7 +512,7 @@ func (app application) installLinuxPackages(ctx context.Context, generic []strin
 		}
 		args := append([]string{candidate.name}, candidate.prefix...)
 		args = append(args, packages...)
-		return app.runner.run(ctx, command{name: "sudo", args: args})
+		return app.runInteractive(ctx, command{name: "sudo", args: args}, InteractiveDependencyInstallation)
 	}
 	return errors.New("no supported Linux package manager found (apt-get, dnf, or pacman)")
 }

@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -26,6 +28,77 @@ func TestValidateAssetsTargetAware(t *testing.T) {
 	writeFixtureFile(t, root, "mss32.dll")
 	if err := validateAssets(root, targetWindows); err != nil {
 		t.Fatalf("Windows assets rejected: %v", err)
+	}
+}
+
+func TestValidateRetailAssetsExportedWrapper(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	writeCompleteAssetTree(t, root)
+	if err := ValidateRetailAssets(root, "linux"); err != nil {
+		t.Fatalf("ValidateRetailAssets() = %v", err)
+	}
+	if err := ValidateRetailAssets(root, "unsupported"); err == nil {
+		t.Fatal("unsupported retail target passed validation")
+	}
+}
+
+func TestAcquireAssetsUsesInteractiveRunner(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	assetsDirectory := filepath.Join(root, "assets")
+	steamCMDDirectory := filepath.Join(root, "steamcmd")
+	if err := os.MkdirAll(steamCMDDirectory, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	steamCMD := filepath.Join(steamCMDDirectory, "steamcmd.sh")
+	if err := os.WriteFile(steamCMD, []byte("placeholder"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	var commands []InteractiveCommand
+	app := application{
+		cfg: config{
+			target:      targetLinux,
+			assetsDir:   assetsDirectory,
+			steamUser:   "builder-account",
+			steamCMDDir: steamCMDDirectory,
+			cacheDir:    filepath.Join(root, "cache"),
+		},
+		hostOS:   "linux",
+		hostArch: "amd64",
+		runner: runner{
+			stdout: io.Discard,
+			stderr: io.Discard,
+		},
+		interactiveRunner: InteractiveCommandRunnerFunc(func(_ context.Context, command InteractiveCommand) error {
+			commands = append(commands, command)
+			writeCompleteAssetTree(t, assetsDirectory)
+			return nil
+		}),
+	}
+	if err := app.acquireAssets(context.Background()); err != nil {
+		t.Fatalf("acquireAssets() = %v", err)
+	}
+	if len(commands) != 1 {
+		t.Fatalf("interactive commands = %d, want 1", len(commands))
+	}
+	command := commands[0]
+	if command.Purpose != InteractiveSteamAuthentication {
+		t.Fatalf("interactive purpose = %q, want %q", command.Purpose, InteractiveSteamAuthentication)
+	}
+	if command.Executable != steamCMD || command.WorkingDirectory != steamCMDDirectory {
+		t.Fatalf("interactive command = %#v", command)
+	}
+	wantArguments := []string{
+		"+@sSteamCmdForcePlatformType", "windows",
+		"+force_install_dir", assetsDirectory,
+		"+login", "builder-account",
+		"+app_update", zeroHourSteamAppID, "validate",
+		"+quit",
+	}
+	if !slices.Equal(command.Arguments, wantArguments) {
+		t.Fatalf("interactive arguments = %q, want %q", command.Arguments, wantArguments)
 	}
 }
 

@@ -37,13 +37,13 @@ func (r runner) run(ctx context.Context, spec command) error {
 	if r.dryRun {
 		return nil
 	}
-	cmd := exec.CommandContext(ctx, spec.name, spec.args...)
+	cmd := exec.Command(spec.name, spec.args...)
 	cmd.Dir = spec.dir
 	cmd.Env = mergeEnvironment(os.Environ(), spec.env)
 	cmd.Stdin = r.stdin
 	cmd.Stdout = r.stdout
 	cmd.Stderr = r.stderr
-	if err := cmd.Run(); err != nil {
+	if err := runManagedCommand(ctx, cmd); err != nil {
 		return fmt.Errorf("run %s: %w", filepath.Base(spec.name), err)
 	}
 	return nil
@@ -54,14 +54,14 @@ func (r runner) output(ctx context.Context, spec command) (string, error) {
 		fmt.Fprintf(r.stdout, "> %s\n", renderCommand(spec))
 		return "", nil
 	}
-	cmd := exec.CommandContext(ctx, spec.name, spec.args...)
+	cmd := exec.Command(spec.name, spec.args...)
 	cmd.Dir = spec.dir
 	cmd.Env = mergeEnvironment(os.Environ(), spec.env)
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
+	if err := runManagedCommand(ctx, cmd); err != nil {
 		detail := strings.TrimSpace(stderr.String())
 		if detail != "" {
 			return "", fmt.Errorf("run %s: %w: %s", filepath.Base(spec.name), err, detail)

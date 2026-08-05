@@ -1,5 +1,70 @@
 # Automated GeneralsXZH Source, Asset, and SFX Build
 
+## Desktop app (preferred)
+
+Download the Automated Build Tool archive for your host from a tagged
+[`vX.Y.Z` release](https://github.com/moloch--/Generals/releases), extract it,
+and open the desktop application normally. The native macOS/ARM64,
+Linux/AMD64, and Windows/AMD64 builds present the same guided flow:
+
+1. choose a target supported by this build host;
+2. select an existing source checkout or automatic clone destination;
+3. select owned retail data or ask SteamCMD to download it;
+4. choose dependency, output, and optional Online server settings;
+5. review the plan and personal-use data boundary, then start the build.
+
+The app validates each step before it starts and shows the shared builder's
+real phase, terminal output, cancellation state, and final artifact path. It
+does not contain game data.
+
+When SteamCMD needs to download files, the desktop app opens it in a real native
+terminal and waits for it to finish. Enter the Steam password and Steam Guard
+challenge only in that terminal. The GUI receives only the non-secret account
+name and SteamCMD's final status; it has no password, token, or challenge field.
+After SteamCMD exits successfully, the build continues in the app.
+
+Prompt-capable host setup also stays visible: Homebrew bootstrap, Rosetta
+installation, and Linux package-manager commands that need administrator
+approval open in a native terminal and return control to the same GUI build.
+Noninteractive dependency commands continue to stream their output in the app.
+
+Each release archive also contains a dependency-light headless companion. The
+desktop executable itself accepts `--headless` and the same flags when started
+from a terminal.
+
+### Build the desktop tool from source
+
+Desktop frontend development requires a valid HeroUI Pro license. Authenticate
+the local HeroUI Pro CLI, or provide `HEROUI_AUTH_TOKEN` to the dependency
+installation step, then build the tracked frontend:
+
+```sh
+cd tools/generalsx-build-desktop/frontend
+npm ci --strict-allow-scripts --no-audit --no-fund
+npm run build
+cd ..
+```
+
+Use `npm run preview:desktop` for an explicitly labelled browser-only preview.
+Normal `npm run dev` is reserved for Wails and fails closed when its native
+bridge is absent, so preview events cannot be mistaken for a real build.
+
+Build the native shell with the pinned Wails CLI. Add
+`-tags webkit2_41` on Linux. On Windows, add
+`-webview2 embed -windowsconsole`; keeping the console subsystem lets the same
+executable provide exact terminal behavior for `--headless` and private prompt
+handoffs while the no-argument launch detaches it for the GUI.
+
+```sh
+go run github.com/wailsapp/wails/v2/cmd/wails@v2.13.0 build \
+  -clean -trimpath -nosyncgomod -skipbindings -skipembedcreate -s
+```
+
+The tag-release workflow performs these builds on native runners and requires a
+repository Actions secret named `HEROUI_AUTH_TOKEN`. Fork pull requests never
+receive that secret and therefore run the Go verification lane without the
+licensed frontend/native packaging jobs.
+
 ## What the command does
 
 `generalsx-build` turns a fresh macOS, Linux, or Windows development machine
@@ -45,9 +110,10 @@ does not echo or store them. Do not use an account password as the account-name
 argument.
 
 Package managers and SDK/tool installers may request the host administrator's
-approval. Automatic macOS LunarG SDK or Rosetta installation additionally
-requires the explicit `--accept-sdk-licenses` flag; read the applicable terms
-before supplying it.
+approval. In desktop mode, prompt-capable installers open in a native terminal
+instead of trying to read from a detached GUI process. Automatic macOS LunarG
+SDK or Rosetta installation additionally requires the explicit
+`--accept-sdk-licenses` flag; read the applicable terms before supplying it.
 
 ## Fresh-machine command
 
@@ -55,6 +121,7 @@ Run outside an existing checkout:
 
 ```sh
 go run github.com/moloch--/Generals/cmd/generalsx-build@main \
+  --headless \
   --steam-user YOUR_STEAM_ACCOUNT
 ```
 
@@ -65,6 +132,7 @@ destination without changing an existing tree:
 
 ```sh
 go run github.com/moloch--/Generals/cmd/generalsx-build@main \
+  --headless \
   --repo /path/to/new/GeneralsX \
   --source-ref main \
   --steam-user YOUR_STEAM_ACCOUNT
@@ -79,13 +147,14 @@ selection. `@main` above selects the version of the bootstrap command itself;
 From the repository root:
 
 ```sh
-go run ./cmd/generalsx-build --steam-user YOUR_STEAM_ACCOUNT
+go run ./cmd/generalsx-build --headless --steam-user YOUR_STEAM_ACCOUNT
 ```
 
 To reuse a previously prepared asset tree and avoid Steam authentication:
 
 ```sh
 go run ./cmd/generalsx-build \
+  --headless \
   --skip-assets \
   --assets-dir /path/to/GeneralsZH
 ```
@@ -118,6 +187,7 @@ component is absent, use:
 
 ```sh
 go run ./cmd/generalsx-build \
+  --headless \
   --steam-user YOUR_STEAM_ACCOUNT \
   --accept-sdk-licenses
 ```
@@ -168,6 +238,7 @@ Add one flag to build a target-native backend and include it in the SFX:
 
 ```sh
 go run ./cmd/generalsx-build \
+  --headless \
   --steam-user YOUR_STEAM_ACCOUNT \
   --with-online-server
 ```
@@ -221,13 +292,14 @@ data, and private management boundaries.
 Show the complete flag list:
 
 ```sh
-go run ./cmd/generalsx-build --help
+go run ./cmd/generalsx-build --headless --help
 ```
 
 Print external actions without cloning, downloading, installing, or building:
 
 ```sh
 go run ./cmd/generalsx-build \
+  --headless \
   --dry-run \
   --target auto \
   --steam-user YOUR_STEAM_ACCOUNT

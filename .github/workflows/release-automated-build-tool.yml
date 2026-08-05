@@ -1,0 +1,830 @@
+name: Release Automated Build Tool
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  pull_request:
+    paths:
+      - go.mod
+      - go.sum
+      - 'cmd/generalsx-build/**'
+      - 'internal/buildcli/**'
+      - 'tools/generalsx-build-desktop/**'
+      - '.github/workflows/release-automated-build-tool.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: automated-build-tool-release-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+env:
+  GOENV: 'off'
+  GOFLAGS: '-mod=readonly'
+  GOTOOLCHAIN: local
+  GOWORK: 'off'
+  TZ: UTC
+  WAILS_VERSION: v2.13.0
+
+jobs:
+  verify-source:
+    name: Verify Go sources and release identity
+    if: github.event_name != 'push' || github.event.deleted == false
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    outputs:
+      product_version: ${{ steps.identity.outputs.product_version }}
+      release_version: ${{ steps.identity.outputs.release_version }}
+      source_commit: ${{ steps.identity.outputs.source_commit }}
+    steps:
+      # GeneralsX @build Codex 05/08/2026 Build versioned desktop and headless tools only from exact vX.Y.Z tags.
+      - name: Checkout repository
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Resolve source and release identity
+        id: identity
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+
+          source_commit="$(git rev-parse 'HEAD^{commit}')"
+          if [[ "${EVENT_NAME}" == 'push' ]]; then
+            if [[ ! "${REF_NAME}" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+              echo "::error::Tag '${REF_NAME}' must match vX.Y.Z without leading zeroes."
+              exit 1
+            fi
+            tag_commit="$(git rev-parse "refs/tags/${REF_NAME}^{commit}")"
+            if [[ "${tag_commit}" != "${source_commit}" ]]; then
+              echo "::error::Checked-out commit does not match ${REF_NAME}."
+              exit 1
+            fi
+            release_version="${REF_NAME}"
+            product_version="${REF_NAME#v}"
+          else
+            release_version="snapshot-${GITHUB_SHA:0:12}"
+            product_version='0.0.0'
+          fi
+
+          echo "product_version=${product_version}" >> "${GITHUB_OUTPUT}"
+          echo "release_version=${release_version}" >> "${GITHUB_OUTPUT}"
+          echo "source_commit=${source_commit}" >> "${GITHUB_OUTPUT}"
+
+      - name: Set up Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - name: Install Linux desktop headers
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends \
+            build-essential \
+            libgtk-3-dev \
+            libwebkit2gtk-4.1-dev \
+            pkg-config
+
+      - name: Verify root Go module
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          unformatted="$(gofmt -l cmd/generalsx-build internal/buildcli)"
+          if [[ -n "${unformatted}" ]]; then
+            echo '::error::Root Go files require formatting.'
+            printf '%s\n' "${unformatted}"
+            exit 1
+          fi
+
+          go mod verify
+          go mod tidy -diff
+          go test ./...
+          go test -race ./...
+          go vet ./...
+          go run ./cmd/generalsx-build --headless --help >/dev/null
+
+      - name: Verify desktop Go module
+        working-directory: tools/generalsx-build-desktop
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          unformatted="$(gofmt -l .)"
+          if [[ -n "${unformatted}" ]]; then
+            echo '::error::Desktop Go files require formatting.'
+            printf '%s\n' "${unformatted}"
+            exit 1
+          fi
+
+          go mod verify
+          go mod tidy -diff
+          module_wails_version="$(
+            go list -m -f '{{.Version}}' github.com/wailsapp/wails/v2
+          )"
+          if [[ "${module_wails_version}" != "${WAILS_VERSION}" ]]; then
+            echo "::error::Wails CLI ${WAILS_VERSION} does not match desktop module ${module_wails_version}."
+            exit 1
+          fi
+          go test -tags webkit2_41 ./...
+          go test -race -tags webkit2_41 ./...
+          go vet -tags webkit2_41 ./...
+
+  build-frontend:
+    name: Verify and build desktop frontend
+    needs: verify-source
+    if: >-
+      github.event_name != 'pull_request' ||
+      (github.event.pull_request.head.repo.full_name == github.repository &&
+      github.actor != 'dependabot[bot]')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with:
+          node-version: 26.6.0
+          cache: npm
+          cache-dependency-path: tools/generalsx-build-desktop/frontend/package-lock.json
+
+      - name: Select audited npm release
+        shell: bash
+        run: npm install --global npm@11.18.0 --ignore-scripts
+
+      - name: Install approved frontend dependencies
+        working-directory: tools/generalsx-build-desktop/frontend
+        shell: bash
+        env:
+          HEROUI_AUTH_TOKEN: ${{ secrets.HEROUI_AUTH_TOKEN }}
+        run: |
+          set -euo pipefail
+          npm ci --strict-allow-scripts --no-audit --no-fund
+
+      - name: Verify dependency policy and frontend
+        working-directory: tools/generalsx-build-desktop/frontend
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          pending_scripts="$(npm install-scripts ls --json)"
+          PENDING_SCRIPTS="${pending_scripts}" node --input-type=module -e '
+            const report = JSON.parse(process.env.PENDING_SCRIPTS);
+            if (!Array.isArray(report.allowScripts) || report.allowScripts.length !== 0) {
+              console.error("Unapproved dependency install scripts remain:", report);
+              process.exit(1);
+            }
+          '
+
+          npm audit --audit-level=moderate
+          npm run build
+
+          if find dist -type l -print -quit | grep -q .; then
+            echo '::error::Frontend artifact must not contain symbolic links.'
+            exit 1
+          fi
+          if grep -RIE 'HEROUI_AUTH_TOKEN|npm_[A-Za-z0-9]{20,}' dist; then
+            echo '::error::Frontend artifact contains credential-shaped text.'
+            exit 1
+          fi
+          test -s dist/index.html
+
+      - name: Upload compiled frontend
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: automated-build-tool-frontend
+          path: tools/generalsx-build-desktop/frontend/dist
+          if-no-files-found: error
+          compression-level: 6
+          retention-days: 3
+
+  build-native:
+    name: Build ${{ matrix.platform }}/${{ matrix.arch }} desktop package
+    needs: [verify-source, build-frontend]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos
+            arch: arm64
+            runner: macos-15
+          - platform: linux
+            arch: amd64
+            runner: ubuntu-24.04
+          - platform: windows
+            arch: amd64
+            runner: windows-2025
+    env:
+      PRODUCT_VERSION: ${{ needs.verify-source.outputs.product_version }}
+      RELEASE_VERSION: ${{ needs.verify-source.outputs.release_version }}
+      SOURCE_COMMIT: ${{ needs.verify-source.outputs.source_commit }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - name: Download compiled frontend
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: automated-build-tool-frontend
+          path: tools/generalsx-build-desktop/frontend/dist
+
+      - name: Verify frontend payload
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s tools/generalsx-build-desktop/frontend/dist/index.html
+          if find tools/generalsx-build-desktop/frontend/dist -type l -print -quit | grep -q .; then
+            echo '::error::Downloaded frontend contains a symbolic link.'
+            exit 1
+          fi
+
+      - name: Install Linux desktop toolchain
+        if: matrix.platform == 'linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends \
+            build-essential \
+            dbus-x11 \
+            libgtk-3-dev \
+            libwebkit2gtk-4.1-dev \
+            pkg-config \
+            xvfb
+
+      - name: Prepare native version metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # Wails reads the platform product version from its tracked config.
+          # Hide only this temporary release-value override from Go's VCS probe;
+          # the generated resources and compiled frontend are already ignored.
+          config='tools/generalsx-build-desktop/wails.json'
+          cp "${config}" "${RUNNER_TEMP}/generalsx-wails.json.original"
+          git update-index --assume-unchanged -- "${config}"
+          CONFIG_PATH="${config}" node --input-type=module -e '
+            import fs from "node:fs";
+            const config = JSON.parse(fs.readFileSync(process.env.CONFIG_PATH, "utf8"));
+            config.info.productVersion = process.env.PRODUCT_VERSION;
+            fs.writeFileSync(process.env.CONFIG_PATH, `${JSON.stringify(config, null, 2)}\n`);
+          '
+
+          if [[ -n "$(git status --porcelain --untracked-files=no)" ]]; then
+            echo '::error::Tracked files other than the hidden packaging version changed before compilation.'
+            git status --short --untracked-files=no
+            exit 1
+          fi
+
+      - name: Build macOS desktop and headless binaries
+        if: matrix.platform == 'macos'
+        shell: bash
+        env:
+          CGO_ENABLED: 1
+          GOARM64: v8.0
+          MACOSX_DEPLOYMENT_TARGET: '11.0'
+        run: |
+          set -euo pipefail
+
+          (
+            cd tools/generalsx-build-desktop
+            go run "github.com/wailsapp/wails/v2/cmd/wails@${WAILS_VERSION}" build \
+              -clean \
+              -trimpath \
+              -nosyncgomod \
+              -m \
+              -skipbindings \
+              -skipembedcreate \
+              -s \
+              -platform darwin/arm64 \
+              -o generalsx-build-desktop \
+              -ldflags="-s -w -buildid= -X main.desktopVersion=${PRODUCT_VERSION} -X main.desktopCommit=${SOURCE_COMMIT}"
+          )
+          CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 GOARM64=v8.0 \
+            go build -buildvcs=true -trimpath -ldflags='-s -w -buildid=' \
+            -o "${RUNNER_TEMP}/generalsx-build" ./cmd/generalsx-build
+
+          desktop='tools/generalsx-build-desktop/build/bin/GeneralsX Automated Build Tool.app/Contents/MacOS/generalsx-build-desktop'
+          expected_build_info="$(printf 'version=%s\ncommit=%s' "${PRODUCT_VERSION}" "${SOURCE_COMMIT}")"
+          actual_build_info="$("${desktop}" --desktop-build-info)"
+          if [[ "${actual_build_info}" != "${expected_build_info}" ]]; then
+            echo '::error::macOS desktop provenance does not match the release source.'
+            printf 'expected:\n%s\nactual:\n%s\n' "${expected_build_info}" "${actual_build_info}"
+            exit 1
+          fi
+          go version "${desktop}" | grep -F 'darwin/arm64'
+
+          metadata="$(go version -m "${RUNNER_TEMP}/generalsx-build")"
+          printf '%s\n' "${metadata}"
+          grep -F "vcs.revision=${SOURCE_COMMIT}" <<< "${metadata}"
+          grep -F 'vcs.modified=false' <<< "${metadata}"
+          go version "${RUNNER_TEMP}/generalsx-build" | grep -F 'darwin/arm64'
+
+      - name: Build Linux desktop and headless binaries
+        if: matrix.platform == 'linux'
+        shell: bash
+        env:
+          CGO_ENABLED: 1
+          GOAMD64: v1
+        run: |
+          set -euo pipefail
+
+          (
+            cd tools/generalsx-build-desktop
+            go run "github.com/wailsapp/wails/v2/cmd/wails@${WAILS_VERSION}" build \
+              -clean \
+              -trimpath \
+              -nosyncgomod \
+              -m \
+              -skipbindings \
+              -skipembedcreate \
+              -s \
+              -tags webkit2_41 \
+              -platform linux/amd64 \
+              -o generalsx-build-desktop \
+              -ldflags="-s -w -buildid= -X main.desktopVersion=${PRODUCT_VERSION} -X main.desktopCommit=${SOURCE_COMMIT}"
+          )
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 GOAMD64=v1 \
+            go build -buildvcs=true -trimpath -ldflags='-s -w -buildid=' \
+            -o "${RUNNER_TEMP}/generalsx-build" ./cmd/generalsx-build
+
+          desktop='tools/generalsx-build-desktop/build/bin/generalsx-build-desktop'
+          expected_build_info="$(printf 'version=%s\ncommit=%s' "${PRODUCT_VERSION}" "${SOURCE_COMMIT}")"
+          actual_build_info="$("${desktop}" --desktop-build-info)"
+          if [[ "${actual_build_info}" != "${expected_build_info}" ]]; then
+            echo '::error::Linux desktop provenance does not match the release source.'
+            printf 'expected:\n%s\nactual:\n%s\n' "${expected_build_info}" "${actual_build_info}"
+            exit 1
+          fi
+          go version "${desktop}" | grep -F 'linux/amd64'
+
+          metadata="$(go version -m "${RUNNER_TEMP}/generalsx-build")"
+          printf '%s\n' "${metadata}"
+          grep -F "vcs.revision=${SOURCE_COMMIT}" <<< "${metadata}"
+          grep -F 'vcs.modified=false' <<< "${metadata}"
+          go version "${RUNNER_TEMP}/generalsx-build" | grep -F 'linux/amd64'
+          ldd "${desktop}" | grep -F 'libwebkit2gtk-4.1.so'
+
+      - name: Build Windows desktop and headless binaries
+        if: matrix.platform == 'windows'
+        working-directory: tools/generalsx-build-desktop
+        shell: pwsh
+        env:
+          CGO_ENABLED: 0
+          GOAMD64: v1
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          go run "github.com/wailsapp/wails/v2/cmd/wails@$env:WAILS_VERSION" build `
+            -clean `
+            -trimpath `
+            -nosyncgomod `
+            -m `
+            -skipbindings `
+            -skipembedcreate `
+            -s `
+            -platform windows/amd64 `
+            -webview2 embed `
+            -windowsconsole `
+            -o generalsx-build-desktop.exe `
+            -ldflags "-s -w -buildid= -X main.desktopVersion=$env:PRODUCT_VERSION -X main.desktopCommit=$env:SOURCE_COMMIT"
+          if ($LASTEXITCODE -ne 0) {
+            exit $LASTEXITCODE
+          }
+
+          go build -buildvcs=true -trimpath -ldflags '-s -w -buildid=' `
+            -o "$env:RUNNER_TEMP\generalsx-build.exe" ../../cmd/generalsx-build
+          if ($LASTEXITCODE -ne 0) {
+            exit $LASTEXITCODE
+          }
+
+          $desktop = 'build\bin\generalsx-build-desktop.exe'
+          $buildInfo = @(& $desktop --desktop-build-info)
+          if ($LASTEXITCODE -ne 0) {
+            exit $LASTEXITCODE
+          }
+          $expectedBuildInfo = @(
+            "version=$env:PRODUCT_VERSION",
+            "commit=$env:SOURCE_COMMIT"
+          )
+          if (Compare-Object $expectedBuildInfo $buildInfo) {
+            throw 'Windows desktop provenance does not match the release source.'
+          }
+          $desktopTarget = go version $desktop | Out-String
+          if (-not $desktopTarget.Contains('windows/amd64')) {
+            throw "$desktop is not a windows/amd64 executable"
+          }
+
+          $headless = "$env:RUNNER_TEMP\generalsx-build.exe"
+          $metadata = go version -m $headless | Out-String
+          Write-Host $metadata
+          if (-not $metadata.Contains("vcs.revision=$env:SOURCE_COMMIT")) {
+            throw "$headless does not identify source commit $env:SOURCE_COMMIT"
+          }
+          if (-not $metadata.Contains('vcs.modified=false')) {
+            throw "$headless was built from a modified worktree"
+          }
+          $headlessTarget = go version $headless | Out-String
+          if (-not $headlessTarget.Contains('windows/amd64')) {
+            throw "$headless is not a windows/amd64 executable"
+          }
+
+      - name: Restore tracked Wails configuration
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          config='tools/generalsx-build-desktop/wails.json'
+          if [[ -f "${RUNNER_TEMP}/generalsx-wails.json.original" ]]; then
+            cp "${RUNNER_TEMP}/generalsx-wails.json.original" "${config}"
+          fi
+          git update-index --no-assume-unchanged -- "${config}"
+          git diff --exit-code -- "${config}"
+
+      - name: Smoke and package macOS application
+        if: matrix.platform == 'macos'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          app='tools/generalsx-build-desktop/build/bin/GeneralsX Automated Build Tool.app'
+          desktop="${app}/Contents/MacOS/generalsx-build-desktop"
+          headless="${RUNNER_TEMP}/generalsx-build"
+          plist_version="$(plutil -extract CFBundleShortVersionString raw "${app}/Contents/Info.plist")"
+          [[ "${plist_version}" == "${PRODUCT_VERSION}" ]]
+
+          "${desktop}" --headless --help > "${RUNNER_TEMP}/desktop-help.txt" 2>&1
+          "${headless}" --headless --help > "${RUNNER_TEMP}/headless-help.txt" 2>&1
+          diff -u "${RUNNER_TEMP}/headless-help.txt" "${RUNNER_TEMP}/desktop-help.txt"
+
+          "${desktop}" > "${RUNNER_TEMP}/desktop-gui.log" 2>&1 &
+          desktop_pid=$!
+          sleep 5
+          if ! kill -0 "${desktop_pid}" 2>/dev/null; then
+            cat "${RUNNER_TEMP}/desktop-gui.log"
+            echo '::error::macOS desktop process did not remain alive.'
+            exit 1
+          fi
+          kill "${desktop_pid}"
+          wait "${desktop_pid}" || true
+
+          codesign --force --deep --sign - "${app}"
+          codesign --verify --deep --strict "${app}"
+
+          package="generalsx-build-${RELEASE_VERSION}-macos-arm64"
+          stage="${RUNNER_TEMP}/${package}"
+          mkdir -p "${stage}"
+          cp -R "${app}" "${stage}/"
+          cp "${headless}" "${stage}/generalsx-build"
+          cp LICENSE.md "${stage}/LICENSE.md"
+          cp tools/generalsx-build-desktop/THIRD_PARTY_NOTICES.md "${stage}/THIRD_PARTY_NOTICES.md"
+          mkdir -p dist
+          ditto -c -k --keepParent "${stage}" "dist/${package}.zip"
+          test -s "dist/${package}.zip"
+
+      - name: Smoke and package Linux application
+        if: matrix.platform == 'linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          desktop='tools/generalsx-build-desktop/build/bin/generalsx-build-desktop'
+          headless="${RUNNER_TEMP}/generalsx-build"
+          "${desktop}" --headless --help > "${RUNNER_TEMP}/desktop-help.txt" 2>&1
+          "${headless}" --headless --help > "${RUNNER_TEMP}/headless-help.txt" 2>&1
+          diff -u "${RUNNER_TEMP}/headless-help.txt" "${RUNNER_TEMP}/desktop-help.txt"
+
+          set +e
+          timeout 8s dbus-run-session -- xvfb-run -a "${desktop}" \
+            > "${RUNNER_TEMP}/desktop-gui.log" 2>&1
+          gui_status=$?
+          set -e
+          if [[ "${gui_status}" -ne 124 ]]; then
+            cat "${RUNNER_TEMP}/desktop-gui.log"
+            echo "::error::Linux desktop process exited unexpectedly with status ${gui_status}."
+            exit 1
+          fi
+
+          package="generalsx-build-${RELEASE_VERSION}-linux-amd64"
+          stage="${RUNNER_TEMP}/${package}"
+          mkdir -p "${stage}"
+          cp "${desktop}" "${stage}/generalsx-build-desktop"
+          cp "${headless}" "${stage}/generalsx-build"
+          cp LICENSE.md "${stage}/LICENSE.md"
+          cp tools/generalsx-build-desktop/THIRD_PARTY_NOTICES.md "${stage}/THIRD_PARTY_NOTICES.md"
+
+          source_date_epoch="$(git show -s --format=%ct "${SOURCE_COMMIT}")"
+          mkdir -p dist
+          tar --sort=name \
+            --mtime="@${source_date_epoch}" \
+            --owner=0 \
+            --group=0 \
+            --numeric-owner \
+            -C "${RUNNER_TEMP}" \
+            -cf - "${package}" \
+            | gzip -n > "dist/${package}.tar.gz"
+          test -s "dist/${package}.tar.gz"
+
+      - name: Smoke and package Windows application
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          $desktop = 'tools\generalsx-build-desktop\build\bin\generalsx-build-desktop.exe'
+          $headless = "$env:RUNNER_TEMP\generalsx-build.exe"
+          & $desktop --headless --help 2>&1 | Set-Content "$env:RUNNER_TEMP\desktop-help.txt"
+          if ($LASTEXITCODE -ne 0) {
+            exit $LASTEXITCODE
+          }
+          & $headless --headless --help 2>&1 | Set-Content "$env:RUNNER_TEMP\headless-help.txt"
+          if ($LASTEXITCODE -ne 0) {
+            exit $LASTEXITCODE
+          }
+          if (Compare-Object `
+              (Get-Content "$env:RUNNER_TEMP\headless-help.txt") `
+              (Get-Content "$env:RUNNER_TEMP\desktop-help.txt")) {
+            throw 'Desktop --headless help differs from the standalone headless tool.'
+          }
+
+          $guiOut = "$env:RUNNER_TEMP\desktop-gui.stdout.log"
+          $guiErr = "$env:RUNNER_TEMP\desktop-gui.stderr.log"
+          $process = Start-Process -FilePath $desktop -PassThru `
+            -RedirectStandardOutput $guiOut -RedirectStandardError $guiErr
+          Start-Sleep -Seconds 5
+          if ($process.HasExited) {
+            Get-Content $guiOut, $guiErr -ErrorAction SilentlyContinue
+            throw "Windows desktop process exited unexpectedly with $($process.ExitCode)."
+          }
+          Stop-Process -Id $process.Id -Force
+          $process.WaitForExit()
+
+          $version = (Get-Item $desktop).VersionInfo.ProductVersion
+          if (-not $version.StartsWith($env:PRODUCT_VERSION)) {
+            throw "Windows product version '$version' does not start with '$env:PRODUCT_VERSION'."
+          }
+
+          $package = "generalsx-build-$env:RELEASE_VERSION-windows-amd64"
+          $stage = Join-Path $env:RUNNER_TEMP $package
+          New-Item -ItemType Directory -Path $stage | Out-Null
+          Copy-Item $desktop (Join-Path $stage 'generalsx-build-desktop.exe')
+          Copy-Item $headless (Join-Path $stage 'generalsx-build.exe')
+          Copy-Item 'LICENSE.md' (Join-Path $stage 'LICENSE.md')
+          Copy-Item 'tools\generalsx-build-desktop\THIRD_PARTY_NOTICES.md' `
+            (Join-Path $stage 'THIRD_PARTY_NOTICES.md')
+          New-Item -ItemType Directory -Path dist | Out-Null
+          Compress-Archive -Path $stage -DestinationPath "dist\$package.zip" -CompressionLevel Optimal
+          if (-not (Test-Path "dist\$package.zip" -PathType Leaf)) {
+            throw 'Windows release archive was not created.'
+          }
+
+      - name: Verify packaged payload names
+        shell: bash
+        env:
+          TARGET_PLATFORM: ${{ matrix.platform }}
+          TARGET_ARCH: ${{ matrix.arch }}
+        run: |
+          set -euo pipefail
+
+          case "${TARGET_PLATFORM}" in
+            linux) extension='tar.gz' ;;
+            macos|windows) extension='zip' ;;
+            *) echo "::error::Unsupported matrix platform ${TARGET_PLATFORM}."; exit 1 ;;
+          esac
+          expected="generalsx-build-${RELEASE_VERSION}-${TARGET_PLATFORM}-${TARGET_ARCH}.${extension}"
+          shopt -s nullglob
+          packaged_paths=(dist/*)
+          if [[ "${#packaged_paths[@]}" -ne 1 ]]; then
+            echo "::error::Expected only ${expected} in the release artifact."
+            printf '%s\n' "${packaged_paths[@]}"
+            exit 1
+          fi
+          packaged="${packaged_paths[0]##*/}"
+          if [[ "${packaged}" != "${expected}" ]]; then
+            echo "::error::Expected only ${expected} in the release artifact, found ${packaged}."
+            exit 1
+          fi
+
+      - name: Upload native release package
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: release-package-${{ matrix.platform }}-${{ matrix.arch }}
+          path: dist/*
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+
+  release:
+    name: Publish verified GitHub release
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+    needs: [verify-source, build-native]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Download native release packages
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          pattern: release-package-*
+          path: dist
+          merge-multiple: true
+
+      - name: Verify packages and generate checksums
+        shell: bash
+        env:
+          RELEASE_VERSION: ${{ needs.verify-source.outputs.release_version }}
+        run: |
+          set -euo pipefail
+
+          expected=(
+            "generalsx-build-${RELEASE_VERSION}-linux-amd64.tar.gz"
+            "generalsx-build-${RELEASE_VERSION}-macos-arm64.zip"
+            "generalsx-build-${RELEASE_VERSION}-windows-amd64.zip"
+          )
+          mapfile -t actual < <(find dist -maxdepth 1 -type f -printf '%f\n' | sort)
+          if ! diff -u \
+            <(printf '%s\n' "${expected[@]}" | sort) \
+            <(printf '%s\n' "${actual[@]}"); then
+            echo '::error::Downloaded release packages do not match the exact supported-platform set.'
+            exit 1
+          fi
+
+          (
+            cd dist
+            sha256sum "${expected[@]}" > SHA256SUMS
+            sha256sum --check SHA256SUMS
+          )
+          test -s dist/SHA256SUMS
+
+      - name: Verify release tag still identifies the build
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_VERSION: ${{ needs.verify-source.outputs.release_version }}
+          SOURCE_COMMIT: ${{ needs.verify-source.outputs.source_commit }}
+        run: |
+          set -euo pipefail
+
+          if [[ ! "${RELEASE_VERSION}" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo "::error::Release tag ${RELEASE_VERSION} is not an exact vX.Y.Z tag."
+            exit 1
+          fi
+          remote_commit="$(
+            gh api "repos/${GH_REPO}/commits/${RELEASE_VERSION}" --jq '.sha'
+          )"
+          if [[ "${remote_commit}" != "${SOURCE_COMMIT}" ]]; then
+            echo "::error::Tag ${RELEASE_VERSION} moved from ${SOURCE_COMMIT} to ${remote_commit} during the build."
+            exit 1
+          fi
+
+      - name: Create or update draft release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_VERSION: ${{ needs.verify-source.outputs.release_version }}
+        run: |
+          set -euo pipefail
+
+          notes="${RUNNER_TEMP}/release-notes.md"
+          printf '%s\n' \
+            'Cross-platform GeneralsX Automated Build Tool desktop applications and standalone headless companions.' \
+            '' \
+            '- macOS: Apple silicon (arm64)' \
+            '- Linux: x86-64 (amd64), WebKitGTK 4.1' \
+            '- Windows: x86-64 (amd64), embedded WebView2 bootstrapper' \
+            '' \
+            'Each archive contains the desktop application, the `generalsx-build` headless tool, `LICENSE.md`, and `THIRD_PARTY_NOTICES.md`. No retail game data is included. Verify downloads with `SHA256SUMS`.' \
+            > "${notes}"
+
+          if draft_state="$(gh release view "${RELEASE_VERSION}" --json isDraft --jq '.isDraft' 2>/dev/null)"; then
+            if [[ "${draft_state}" != 'true' ]]; then
+              echo "::error::Release ${RELEASE_VERSION} is already published."
+              exit 1
+            fi
+          else
+            gh release create "${RELEASE_VERSION}" \
+              --draft \
+              --verify-tag \
+              --latest=false \
+              --title "GeneralsX Automated Build Tool ${RELEASE_VERSION}" \
+              --notes-file "${notes}"
+          fi
+
+          mapfile -t existing_assets < <(
+            gh release view "${RELEASE_VERSION}" --json assets \
+              --jq '.assets[].name' | sort
+          )
+          expected_assets=(
+            'SHA256SUMS'
+            "generalsx-build-${RELEASE_VERSION}-linux-amd64.tar.gz"
+            "generalsx-build-${RELEASE_VERSION}-macos-arm64.zip"
+            "generalsx-build-${RELEASE_VERSION}-windows-amd64.zip"
+          )
+          for asset in "${existing_assets[@]}"; do
+            if ! printf '%s\n' "${expected_assets[@]}" | grep -Fqx -- "${asset}"; then
+              echo "::error::Draft release contains unexpected asset ${asset}."
+              exit 1
+            fi
+          done
+
+          gh release edit "${RELEASE_VERSION}" \
+            --draft=true \
+            --latest=false \
+            --title "GeneralsX Automated Build Tool ${RELEASE_VERSION}" \
+            --notes-file "${notes}"
+          gh release upload "${RELEASE_VERSION}" \
+            dist/SHA256SUMS \
+            dist/generalsx-build-*.tar.gz \
+            dist/generalsx-build-*.zip \
+            --clobber
+
+      - name: Verify exact draft assets and publish
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_VERSION: ${{ needs.verify-source.outputs.release_version }}
+          SOURCE_COMMIT: ${{ needs.verify-source.outputs.source_commit }}
+        run: |
+          set -euo pipefail
+
+          expected_assets=(
+            'SHA256SUMS'
+            "generalsx-build-${RELEASE_VERSION}-linux-amd64.tar.gz"
+            "generalsx-build-${RELEASE_VERSION}-macos-arm64.zip"
+            "generalsx-build-${RELEASE_VERSION}-windows-amd64.zip"
+          )
+          mapfile -t remote_assets < <(
+            gh release view "${RELEASE_VERSION}" --json assets \
+              --jq '.assets[].name' | sort
+          )
+          if ! diff -u \
+            <(printf '%s\n' "${expected_assets[@]}" | sort) \
+            <(printf '%s\n' "${remote_assets[@]}"); then
+            echo '::error::Draft release assets are incomplete, empty, or unexpected.'
+            exit 1
+          fi
+          empty_asset="$(
+            gh release view "${RELEASE_VERSION}" --json assets \
+              --jq '.assets[] | select(.size <= 0) | .name' | head -n 1
+          )"
+          if [[ -n "${empty_asset}" ]]; then
+            echo "::error::Draft release asset ${empty_asset} is empty."
+            exit 1
+          fi
+
+          draft_state="$(gh release view "${RELEASE_VERSION}" --json isDraft --jq '.isDraft')"
+          if [[ "${draft_state}" != 'true' ]]; then
+            echo '::error::Release was not a draft during asset verification.'
+            exit 1
+          fi
+
+          remote_commit="$(
+            gh api "repos/${GH_REPO}/commits/${RELEASE_VERSION}" --jq '.sha'
+          )"
+          if [[ "${remote_commit}" != "${SOURCE_COMMIT}" ]]; then
+            echo "::error::Tag ${RELEASE_VERSION} moved before publication."
+            exit 1
+          fi
+
+          gh release edit "${RELEASE_VERSION}" --draft=false --latest=false
+          published_state="$(gh release view "${RELEASE_VERSION}" --json isDraft --jq '.isDraft')"
+          if [[ "${published_state}" != 'false' ]]; then
+            echo "::error::Release ${RELEASE_VERSION} was not published."
+            exit 1
+          fi

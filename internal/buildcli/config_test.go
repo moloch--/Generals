@@ -60,6 +60,57 @@ func TestParseConfigOnlineServerDefaultsToLoopback(t *testing.T) {
 	}
 }
 
+func TestLoadConfigurationDefaults(t *testing.T) {
+	t.Parallel()
+	defaults, err := LoadConfigurationDefaults()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for label, value := range map[string]string{
+		"repository root":          defaults.RepositoryRoot,
+		"source repository":        defaults.SourceRepository,
+		"source reference":         defaults.SourceReference,
+		"asset directory":          defaults.AssetsDirectory,
+		"SteamCMD directory":       defaults.SteamCMDDirectory,
+		"cache directory":          defaults.CacheDirectory,
+		"output path":              defaults.OutputPath,
+		"Online server repository": defaults.OnlineServerRepository,
+		"Online server reference":  defaults.OnlineServerReference,
+	} {
+		if value == "" {
+			t.Errorf("%s is empty", label)
+		}
+	}
+	if defaults.Target != "auto" {
+		t.Fatalf("Target = %q, want auto", defaults.Target)
+	}
+	if !defaults.InstallDependencies {
+		t.Fatal("InstallDependencies = false, want true")
+	}
+	if defaults.SteamCMDDirectory != filepath.Join(defaults.CacheDirectory, "steamcmd") {
+		t.Fatalf("SteamCMDDirectory = %q", defaults.SteamCMDDirectory)
+	}
+	if runtime.GOOS == "darwin" && defaults.AppOutputPath == "" {
+		t.Fatal("AppOutputPath is empty on macOS")
+	}
+}
+
+func TestValidateArgumentsAcceptsHeadless(t *testing.T) {
+	t.Parallel()
+	for _, arguments := range [][]string{
+		{"--headless", "--help"},
+		{"--headless=true", "--help"},
+		{"--headless=false", "--help"},
+	} {
+		if err := ValidateArguments(arguments); err != nil {
+			t.Errorf("ValidateArguments(%q) = %v", arguments, err)
+		}
+	}
+	if err := ValidateArguments([]string{"--target", "unsupported"}); err == nil {
+		t.Fatal("unsupported target passed argument validation")
+	}
+}
+
 func TestValidateOnlineEndpoint(t *testing.T) {
 	t.Parallel()
 	for _, value := range []string{

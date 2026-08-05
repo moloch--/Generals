@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 )
 
@@ -116,7 +117,8 @@ func (app application) acquireAssets(ctx context.Context) error {
 	}
 	fmt.Fprintln(app.runner.stdout, "SteamCMD will prompt directly for the account password and any Steam Guard challenge.")
 	fmt.Fprintln(app.runner.stdout, "The builder never accepts, stores, or logs those secrets.")
-	if err := app.runner.run(ctx, command{name: steamCMD, args: args, dir: app.cfg.steamCMDDir}); err != nil {
+	spec := command{name: steamCMD, args: args, dir: app.cfg.steamCMDDir}
+	if err := app.runInteractive(ctx, spec, InteractiveSteamAuthentication); err != nil {
 		return fmt.Errorf("download Steam app %s: %w", zeroHourSteamAppID, err)
 	}
 	if app.cfg.dryRun {
@@ -219,10 +221,10 @@ func (app application) ensureRosetta(ctx context.Context) error {
 	if app.cfg.nonInteractive {
 		return errors.New("Rosetta 2 installation may require sudo interaction; install it before using --non-interactive")
 	}
-	if err := app.runner.run(ctx, command{
+	if err := app.runInteractive(ctx, command{
 		name: "sudo",
 		args: []string{"/usr/sbin/softwareupdate", "--install-rosetta", "--agree-to-license"},
-	}); err != nil {
+	}, InteractiveDependencyInstallation); err != nil {
 		return fmt.Errorf("install Rosetta 2: %w", err)
 	}
 	return nil
@@ -256,6 +258,20 @@ func validateAssets(root string, targetOS target) error {
 		}
 	}
 	return nil
+}
+
+// GeneralsX @feature Codex 05/08/2026 Share strict retail validation with graphical frontends.
+// ValidateRetailAssets validates an owned asset tree for auto, macos, linux,
+// or windows using the same rules as the command-line build.
+func ValidateRetailAssets(root, requestedTarget string) error {
+	if requestedTarget == "" {
+		requestedTarget = "auto"
+	}
+	resolvedTarget, err := parseTarget(requestedTarget, runtime.GOOS)
+	if err != nil {
+		return err
+	}
+	return validateAssets(root, resolvedTarget)
 }
 
 func validateLocalizedArchives(root string) error {

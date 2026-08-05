@@ -53,51 +53,114 @@ type config struct {
 	keepWindowsStage   bool
 }
 
-// GeneralsX @build Codex 04/08/2026 Keep automation flags explicit and non-secret.
-func parseConfig(arguments []string, stderr io.Writer) (config, error) {
+// GeneralsX @feature Codex 05/08/2026 Expose effective builder defaults to non-terminal frontends.
+// ConfigurationDefaults contains the host-specific values presented when no
+// command-line override is supplied.
+type ConfigurationDefaults struct {
+	RepositoryRoot         string `json:"repositoryRoot"`
+	SourceRepository       string `json:"sourceRepository"`
+	SourceReference        string `json:"sourceReference"`
+	Target                 string `json:"target"`
+	AssetsDirectory        string `json:"assetsDirectory"`
+	SteamUser              string `json:"steamUser"`
+	SteamCMDDirectory      string `json:"steamCMDDirectory"`
+	CacheDirectory         string `json:"cacheDirectory"`
+	OutputPath             string `json:"outputPath"`
+	AppOutputPath          string `json:"appOutputPath,omitempty"`
+	InstallDependencies    bool   `json:"installDependencies"`
+	AcceptSDKLicenses      bool   `json:"acceptSDKLicenses"`
+	IncludeOnlineServer    bool   `json:"includeOnlineServer"`
+	OnlineServerSource     string `json:"onlineServerSource,omitempty"`
+	OnlineServerRepository string `json:"onlineServerRepository"`
+	OnlineServerReference  string `json:"onlineServerReference"`
+	OnlineEndpoint         string `json:"onlineEndpoint,omitempty"`
+	SkipAssets             bool   `json:"skipAssets"`
+	SkipGameBuild          bool   `json:"skipGameBuild"`
+	DryRun                 bool   `json:"dryRun"`
+	NonInteractive         bool   `json:"nonInteractive"`
+	KeepWindowsStage       bool   `json:"keepWindowsStage"`
+}
+
+// GeneralsX @feature Codex 05/08/2026 Share CLI defaults without exposing internal execution state.
+// LoadConfigurationDefaults resolves the defaults for the current host.
+func LoadConfigurationDefaults() (ConfigurationDefaults, error) {
 	workingDirectory, err := os.Getwd()
 	if err != nil {
-		return config{}, fmt.Errorf("resolve working directory: %w", err)
+		return ConfigurationDefaults{}, fmt.Errorf("resolve working directory: %w", err)
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return config{}, fmt.Errorf("resolve user home: %w", err)
+		return ConfigurationDefaults{}, fmt.Errorf("resolve user home: %w", err)
 	}
 	userCache, err := os.UserCacheDir()
 	if err != nil {
-		return config{}, fmt.Errorf("resolve user cache: %w", err)
+		return ConfigurationDefaults{}, fmt.Errorf("resolve user cache: %w", err)
+	}
+
+	repositoryRoot := workingDirectory
+	if validateRepository(workingDirectory) != nil {
+		repositoryRoot = filepath.Join(home, "GeneralsX", "source")
+	}
+	resolvedTarget, err := parseTarget("auto", runtime.GOOS)
+	if err != nil {
+		return ConfigurationDefaults{}, err
+	}
+	cacheDirectory := filepath.Join(userCache, "GeneralsX", "builder")
+	defaults := ConfigurationDefaults{
+		RepositoryRoot:         repositoryRoot,
+		SourceRepository:       defaultSourceRepo,
+		SourceReference:        "main",
+		Target:                 "auto",
+		AssetsDirectory:        filepath.Join(home, "GeneralsX", "GeneralsZH"),
+		SteamUser:              os.Getenv("STEAM_USER"),
+		SteamCMDDirectory:      filepath.Join(cacheDirectory, "steamcmd"),
+		CacheDirectory:         cacheDirectory,
+		OutputPath:             defaultOutput(repositoryRoot, resolvedTarget),
+		InstallDependencies:    true,
+		OnlineServerRepository: defaultServerRepo,
+		OnlineServerReference:  "main",
+	}
+	if resolvedTarget == targetMacOS {
+		defaults.AppOutputPath = filepath.Join(repositoryRoot, "build", "sfx", "GeneralsXZH.app")
+	}
+	return defaults, nil
+}
+
+// GeneralsX @build Codex 04/08/2026 Keep automation flags explicit and non-secret.
+func parseConfig(arguments []string, stderr io.Writer) (config, error) {
+	defaults, err := LoadConfigurationDefaults()
+	if err != nil {
+		return config{}, err
 	}
 
 	var cfg config
-	var requestedTarget string
+	requestedTarget := defaults.Target
+	var headless bool
 	flags := flag.NewFlagSet("generalsx-build", flag.ContinueOnError)
 	flags.SetOutput(stderr)
-	defaultRepoRoot := workingDirectory
-	if validateRepository(workingDirectory) != nil {
-		defaultRepoRoot = filepath.Join(home, "GeneralsX", "source")
-	}
-	flags.StringVar(&cfg.repoRoot, "repo", defaultRepoRoot, "existing checkout or destination for an automatic clone")
-	flags.StringVar(&cfg.sourceRepo, "source-repo", defaultSourceRepo, "GeneralsX Git URL used when --repo does not exist")
-	flags.StringVar(&cfg.sourceRef, "source-ref", "main", "game source branch, tag, or commit to check out after cloning")
-	flags.StringVar(&requestedTarget, "target", "auto", "target: auto, macos, linux, or windows")
-	flags.StringVar(&cfg.assetsDir, "assets-dir", filepath.Join(home, "GeneralsX", "GeneralsZH"), "owned Zero Hour retail-data directory")
-	flags.StringVar(&cfg.steamUser, "steam-user", os.Getenv("STEAM_USER"), "Steam account name; SteamCMD prompts for secrets")
-	flags.StringVar(&cfg.cacheDir, "cache-dir", filepath.Join(userCache, "GeneralsX", "builder"), "private dependency/download cache")
+	flags.StringVar(&cfg.repoRoot, "repo", defaults.RepositoryRoot, "existing checkout or destination for an automatic clone")
+	flags.StringVar(&cfg.sourceRepo, "source-repo", defaults.SourceRepository, "GeneralsX Git URL used when --repo does not exist")
+	flags.StringVar(&cfg.sourceRef, "source-ref", defaults.SourceReference, "game source branch, tag, or commit to check out after cloning")
+	flags.StringVar(&requestedTarget, "target", defaults.Target, "target: auto, macos, linux, or windows")
+	flags.StringVar(&cfg.assetsDir, "assets-dir", defaults.AssetsDirectory, "owned Zero Hour retail-data directory")
+	flags.StringVar(&cfg.steamUser, "steam-user", defaults.SteamUser, "Steam account name; SteamCMD prompts for secrets")
+	flags.StringVar(&cfg.cacheDir, "cache-dir", defaults.CacheDirectory, "private dependency/download cache")
 	flags.StringVar(&cfg.steamCMDDir, "steamcmd-dir", "", "SteamCMD installation directory (default: CACHE/steamcmd)")
 	flags.StringVar(&cfg.output, "output", "", "raw SFX output path")
 	flags.StringVar(&cfg.appOutput, "app-output", "", "macOS .app output path")
-	flags.BoolVar(&cfg.installDeps, "install-deps", true, "install missing host build dependencies")
-	flags.BoolVar(&cfg.acceptSDKLicenses, "accept-sdk-licenses", false, "accept required SDK/tool licenses during automatic installation")
-	flags.BoolVar(&cfg.withOnlineServer, "with-online-server", false, "embed a target-native generals-server sidecar")
-	flags.StringVar(&cfg.onlineServerSource, "online-server-source", "", "existing generals-server checkout (default: ./generals-server or managed clone)")
-	flags.StringVar(&cfg.onlineServerRepo, "online-server-repo", defaultServerRepo, "server Git URL used when no local checkout exists")
-	flags.StringVar(&cfg.onlineServerRef, "online-server-ref", "main", "server Git ref used for a managed clone")
-	flags.StringVar(&cfg.onlineEndpoint, "online-endpoint", "", "default Online endpoint compiled into the game")
-	flags.BoolVar(&cfg.skipAssets, "skip-assets", false, "do not run SteamCMD; require an existing asset tree")
-	flags.BoolVar(&cfg.skipGameBuild, "skip-game-build", false, "reuse the current native game build")
-	flags.BoolVar(&cfg.dryRun, "dry-run", false, "print planned external actions without changing the host")
-	flags.BoolVar(&cfg.nonInteractive, "non-interactive", false, "fail instead of requesting Steam Guard or installer interaction")
-	flags.BoolVar(&cfg.keepWindowsStage, "keep-windows-stage", false, "retain the generated Windows runtime stage for diagnosis")
+	flags.BoolVar(&cfg.installDeps, "install-deps", defaults.InstallDependencies, "install missing host build dependencies")
+	flags.BoolVar(&cfg.acceptSDKLicenses, "accept-sdk-licenses", defaults.AcceptSDKLicenses, "accept required SDK/tool licenses during automatic installation")
+	flags.BoolVar(&headless, "headless", false, "run the terminal interface without a graphical frontend")
+	flags.BoolVar(&cfg.withOnlineServer, "with-online-server", defaults.IncludeOnlineServer, "embed a target-native generals-server sidecar")
+	flags.StringVar(&cfg.onlineServerSource, "online-server-source", defaults.OnlineServerSource, "existing generals-server checkout (default: ./generals-server or managed clone)")
+	flags.StringVar(&cfg.onlineServerRepo, "online-server-repo", defaults.OnlineServerRepository, "server Git URL used when no local checkout exists")
+	flags.StringVar(&cfg.onlineServerRef, "online-server-ref", defaults.OnlineServerReference, "server Git ref used for a managed clone")
+	flags.StringVar(&cfg.onlineEndpoint, "online-endpoint", defaults.OnlineEndpoint, "default Online endpoint compiled into the game")
+	flags.BoolVar(&cfg.skipAssets, "skip-assets", defaults.SkipAssets, "do not run SteamCMD; require an existing asset tree")
+	flags.BoolVar(&cfg.skipGameBuild, "skip-game-build", defaults.SkipGameBuild, "reuse the current native game build")
+	flags.BoolVar(&cfg.dryRun, "dry-run", defaults.DryRun, "print planned external actions without changing the host")
+	flags.BoolVar(&cfg.nonInteractive, "non-interactive", defaults.NonInteractive, "fail instead of requesting Steam Guard or installer interaction")
+	flags.BoolVar(&cfg.keepWindowsStage, "keep-windows-stage", defaults.KeepWindowsStage, "retain the generated Windows runtime stage for diagnosis")
 	if err := flags.Parse(arguments); err != nil {
 		return config{}, err
 	}
@@ -163,6 +226,19 @@ func parseConfig(arguments []string, stderr io.Writer) (config, error) {
 		return config{}, err
 	}
 	return cfg, nil
+}
+
+// GeneralsX @feature Codex 05/08/2026 Reuse command-line validation from graphical frontends.
+// ValidateArguments validates builder arguments without running a build.
+func ValidateArguments(arguments []string) error {
+	cfg, err := parseConfig(arguments, io.Discard)
+	if errors.Is(err, flag.ErrHelp) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	return (application{cfg: cfg, hostOS: runtime.GOOS, hostArch: runtime.GOARCH}).validateHostTarget()
 }
 
 func parseTarget(value, hostOS string) (target, error) {

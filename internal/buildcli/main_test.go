@@ -7,6 +7,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -17,6 +19,7 @@ func TestApplicationDryRunPlansSourceCloneAndBuild(t *testing.T) {
 	repository := filepath.Join(root, "source")
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
+	var phases []ProgressPhase
 	app := application{
 		cfg: config{
 			repoRoot:      repository,
@@ -39,6 +42,9 @@ func TestApplicationDryRunPlansSourceCloneAndBuild(t *testing.T) {
 		},
 		hostOS:   "linux",
 		hostArch: "amd64",
+		reporter: ReporterFunc(func(event ProgressEvent) {
+			phases = append(phases, event.Phase)
+		}),
 	}
 	if err := app.run(context.Background()); err != nil {
 		t.Fatalf("run() error = %v, stderr = %s", err, stderr.String())
@@ -58,6 +64,71 @@ func TestApplicationDryRunPlansSourceCloneAndBuild(t *testing.T) {
 	}
 	if _, err := os.Lstat(repository); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("dry run created repository path or returned unexpected error: %v", err)
+	}
+	wantPhases := []ProgressPhase{
+		ProgressPhasePreflight,
+		ProgressPhaseSource,
+		ProgressPhaseToolchain,
+		ProgressPhaseAssets,
+		ProgressPhaseOnlineServer,
+		ProgressPhaseBuild,
+		ProgressPhaseComplete,
+	}
+	if !slices.Equal(phases, wantPhases) {
+		t.Fatalf("progress phases = %q, want %q", phases, wantPhases)
+	}
+}
+
+func TestMainHeadlessPreservesHelpOutput(t *testing.T) {
+	t.Parallel()
+	run := func(arguments ...string) (int, string, string) {
+		var stdout bytes.Buffer
+		var stderr bytes.Buffer
+		status := Main(context.Background(), arguments, strings.NewReader(""), &stdout, &stderr)
+		return status, stdout.String(), stderr.String()
+	}
+
+	wantStatus, wantStdout, wantStderr := run("--help")
+	gotStatus, gotStdout, gotStderr := run("--headless", "--help")
+	if gotStatus != wantStatus || gotStdout != wantStdout || gotStderr != wantStderr {
+		t.Fatalf("headless help differs:\nstatus %d != %d\nstdout %q != %q\nstderr %q != %q",
+			gotStatus, wantStatus, gotStdout, wantStdout, gotStderr, wantStderr)
+	}
+}
+
+func TestMainWithReporterReportsPreflightFailure(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	requestedTarget := "windows"
+	output := filepath.Join(root, "output", "game.exe")
+	arguments := []string{
+		"--target", requestedTarget,
+		"--repo", filepath.Join(root, "source"),
+		"--assets-dir", filepath.Join(root, "assets"),
+		"--cache-dir", filepath.Join(root, "cache"),
+		"--output", output,
+	}
+	if runtime.GOOS == "windows" {
+		requestedTarget = "macos"
+		arguments[1] = requestedTarget
+		arguments = append(arguments, "--app-output", filepath.Join(root, "output", "game.app"))
+	}
+	var events []ProgressEvent
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	status := MainWithReporter(
+		context.Background(),
+		arguments,
+		strings.NewReader(""),
+		&stdout,
+		&stderr,
+		ReporterFunc(func(event ProgressEvent) { events = append(events, event) }),
+	)
+	if status != 1 {
+		t.Fatalf("status = %d, stderr = %s", status, stderr.String())
+	}
+	if len(events) != 1 || events[0].Phase != ProgressPhasePreflight {
+		t.Fatalf("events = %#v, want one preflight event", events)
 	}
 }
 

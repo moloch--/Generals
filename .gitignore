@@ -50,6 +50,14 @@ thumbs.db
 /Dependencies/MaxSDK/maxsdk
 /tmp/
 
+# GeneralsX @build Codex 05/08/2026 Keep generated Wails and frontend artifacts out of source control.
+/tools/generalsx-build-desktop/build/bin/
+/tools/generalsx-build-desktop/frontend/node_modules/
+/tools/generalsx-build-desktop/frontend/coverage/
+/tools/generalsx-build-desktop/frontend/dist/*
+!/tools/generalsx-build-desktop/frontend/dist/gitkeep
+/tools/generalsx-build-desktop/frontend/package.json.md5
+
 # GeneralsX @build OpenAI 01/08/2026 Keep the standalone Online server as its own adjacent Git repository.
 /generals-server/
 

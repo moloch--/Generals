@@ -1,0 +1,20 @@
+{
+  "$schema": "https://wails.io/schemas/config.v2.json",
+  "name": "GeneralsX Automated Build Tool",
+  "outputfilename": "generalsx-build-desktop",
+  "frontend:install": "npm ci",
+  "frontend:build": "npm run build",
+  "frontend:dev:watcher": "npm run dev",
+  "frontend:dev:serverUrl": "auto",
+  "author": {
+    "name": "GeneralsX contributors",
+    "email": ""
+  },
+  "info": {
+    "companyName": "GeneralsX",
+    "productName": "GeneralsX Automated Build Tool",
+    "productVersion": "1.0.0",
+    "copyright": "Copyright GeneralsX contributors",
+    "comments": "Build personal GeneralsX packages from source and user-owned retail data."
+  }
+}
