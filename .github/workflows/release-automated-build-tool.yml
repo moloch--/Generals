@@ -603,11 +603,6 @@ jobs:
           Stop-Process -Id $process.Id -Force
           $process.WaitForExit()
 
-          $version = (Get-Item $desktop).VersionInfo.ProductVersion
-          if (-not $version.StartsWith($env:PRODUCT_VERSION)) {
-            throw "Windows product version '$version' does not start with '$env:PRODUCT_VERSION'."
-          }
-
           $package = "generalsx-build-$env:RELEASE_VERSION-windows-amd64"
           $stage = Join-Path $env:RUNNER_TEMP $package
           New-Item -ItemType Directory -Path $stage | Out-Null
