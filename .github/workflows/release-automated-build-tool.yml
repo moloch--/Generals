@@ -173,7 +173,15 @@ jobs:
           HEROUI_AUTH_TOKEN: ${{ secrets.HEROUI_AUTH_TOKEN }}
         run: |
           set -euo pipefail
+          test -n "${HEROUI_AUTH_TOKEN}"
           npm ci --strict-allow-scripts --no-audit --no-fund
+          npx --no-install heroui-pro install react \
+            --yes \
+            --skip-peers \
+            --no-trust-patch
+
+          test -s node_modules/@heroui-pro/react/dist/components/stepper/index.d.ts
+          test -s node_modules/@heroui-pro/react/dist/components/radio-button-group/index.d.ts
 
       - name: Verify dependency policy and frontend
         working-directory: tools/generalsx-build-desktop/frontend
