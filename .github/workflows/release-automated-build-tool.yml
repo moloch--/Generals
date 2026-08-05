@@ -416,6 +416,12 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
 
+          go -C ../.. build -buildvcs=true -trimpath -ldflags '-s -w -buildid=' `
+            -o "$env:RUNNER_TEMP\generalsx-build.exe" ./cmd/generalsx-build
+          if ($LASTEXITCODE -ne 0) {
+            exit $LASTEXITCODE
+          }
+
           go run "github.com/wailsapp/wails/v2/cmd/wails@$env:WAILS_VERSION" build `
             -clean `
             -trimpath `
@@ -429,12 +435,6 @@ jobs:
             -windowsconsole `
             -o generalsx-build-desktop.exe `
             -ldflags "-s -w -buildid= -X main.desktopVersion=$env:PRODUCT_VERSION -X main.desktopCommit=$env:SOURCE_COMMIT"
-          if ($LASTEXITCODE -ne 0) {
-            exit $LASTEXITCODE
-          }
-
-          go -C ../.. build -buildvcs=true -trimpath -ldflags '-s -w -buildid=' `
-            -o "$env:RUNNER_TEMP\generalsx-build.exe" ./cmd/generalsx-build
           if ($LASTEXITCODE -ne 0) {
             exit $LASTEXITCODE
           }
