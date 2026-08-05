@@ -433,8 +433,8 @@ jobs:
             exit $LASTEXITCODE
           }
 
-          go build -buildvcs=true -trimpath -ldflags '-s -w -buildid=' `
-            -o "$env:RUNNER_TEMP\generalsx-build.exe" ../../cmd/generalsx-build
+          go -C ../.. build -buildvcs=true -trimpath -ldflags '-s -w -buildid=' `
+            -o "$env:RUNNER_TEMP\generalsx-build.exe" ./cmd/generalsx-build
           if ($LASTEXITCODE -ne 0) {
             exit $LASTEXITCODE
           }
