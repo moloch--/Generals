@@ -13,6 +13,8 @@
         <string>{{.Info.ProductVersion}}</string>
         <key>CFBundleShortVersionString</key>
         <string>{{.Info.ProductVersion}}</string>
+        <key>CFBundleIconFile</key>
+        <string>iconfile</string>
         <key>CFBundleGetInfoString</key>
         <string>{{.Info.Comments}}</string>
         <key>LSMinimumSystemVersion</key>

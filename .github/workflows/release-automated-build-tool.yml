@@ -10,6 +10,7 @@ on:
       - go.sum
       - 'cmd/generalsx-build/**'
       - 'internal/buildcli/**'
+      - 'scripts/tooling/sfx/**'
       - 'tools/generalsx-build-desktop/**'
       - '.github/workflows/release-automated-build-tool.yml'
   workflow_dispatch:
@@ -139,6 +140,25 @@ jobs:
           go test -tags webkit2_41 ./...
           go test -race -tags webkit2_41 ./...
           go vet -tags webkit2_41 ./...
+
+      - name: Verify SFX launcher module
+        working-directory: scripts/tooling/sfx
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          unformatted="$(gofmt -l .)"
+          if [[ -n "${unformatted}" ]]; then
+            echo '::error::SFX Go files require formatting.'
+            printf '%s\n' "${unformatted}"
+            exit 1
+          fi
+
+          go mod verify
+          go mod tidy -diff
+          go test ./...
+          go test -race ./...
+          go vet ./...
 
   build-frontend:
     name: Verify and build desktop frontend
@@ -270,6 +290,14 @@ jobs:
             echo '::error::Downloaded frontend contains a symbolic link.'
             exit 1
           fi
+
+      - name: Verify signed macOS game application handling
+        if: matrix.platform == 'macos'
+        working-directory: tools/generalsx-build-desktop
+        shell: bash
+        run: |
+          set -euo pipefail
+          go test -count=1 -run '^TestProductionMacOSSFXAppVerificationAndCopy$' .
 
       - name: Install Linux desktop toolchain
         if: matrix.platform == 'linux'
@@ -496,6 +524,12 @@ jobs:
           headless="${RUNNER_TEMP}/generalsx-build"
           plist_version="$(plutil -extract CFBundleShortVersionString raw "${app}/Contents/Info.plist")"
           [[ "${plist_version}" == "${PRODUCT_VERSION}" ]]
+          # GeneralsX @build Codex 05/08/2026 Require Finder to associate the generated Generals icon with the app.
+          plist_icon="$(plutil -extract CFBundleIconFile raw "${app}/Contents/Info.plist")"
+          [[ "${plist_icon}" == 'iconfile' ]]
+          app_icon="${app}/Contents/Resources/iconfile.icns"
+          test -s "${app_icon}"
+          file "${app_icon}" | grep -F 'Mac OS X icon'
 
           "${desktop}" --headless --help > "${RUNNER_TEMP}/desktop-help.txt" 2>&1
           "${headless}" --headless --help > "${RUNNER_TEMP}/headless-help.txt" 2>&1
@@ -769,7 +803,9 @@ jobs:
             '' \
             'Desktop applications and `generalsx-build` headless tools are separate downloads. The macOS desktop app is delivered in a DMG so its signed `.app` bundle remains intact; Linux and Windows desktop executables are attached directly.' \
             '' \
-            'After downloading a direct macOS or Linux executable, run `chmod +x PATH` before launching it. The macOS application is ad-hoc signed and is not notarized. No retail game data is included. Verify downloads with `SHA256SUMS`; licensing details are attached separately.' \
+            'For personal macOS game builds, `GeneralsXZH.app` is the primary artifact and Copy to Desktop preserves its Generals icon and complete bundle. The nested raw launcher remains available for terminal and headless workflows.' \
+            '' \
+            'After downloading a direct macOS or Linux executable, run `chmod +x PATH` before launching it. The macOS application is ad-hoc signed and is not notarized. No retail game data or user-generated game SFX/app bundle is included or uploaded as a release asset. Verify downloads with `SHA256SUMS`; licensing details are attached separately.' \
             > "${notes}"
 
           if draft_state="$(gh release view "${RELEASE_VERSION}" --json isDraft --jq '.isDraft' 2>/dev/null)"; then

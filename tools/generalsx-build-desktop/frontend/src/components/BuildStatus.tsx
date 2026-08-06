@@ -5,7 +5,7 @@ import {Chip} from "@heroui/react/chip";
 import {Label} from "@heroui/react/label";
 import {ProgressBar} from "@heroui/react/progress-bar";
 import {ScrollShadow} from "@heroui/react/scroll-shadow";
-import {useState} from "react";
+import {useLayoutEffect, useRef, useState} from "react";
 
 import {CleanupBuildDialog} from "./CleanupBuildDialog";
 import {
@@ -17,6 +17,11 @@ import {
 import type {CleanupFeedback} from "../lib/cleanupFeedback";
 import {idleCopyFeedback, runDesktopCopy} from "../lib/copyFeedback";
 import type {CopyFeedback} from "../lib/copyFeedback";
+import {
+  DEFAULT_FOLLOW_LOG_TAIL,
+  isAtLogTail,
+  scrollLogToTail,
+} from "../lib/logScroll";
 import {selectPostBuildActions} from "../lib/postBuildActions";
 import {formatPhase} from "../lib/request";
 import type {BuildCleanupPlan, BuildLogEvent, BuildProgressEvent, ExecutionState} from "../types";
@@ -26,7 +31,7 @@ interface BuildStatusProps {
   progress: BuildProgressEvent | null;
   logs: BuildLogEvent[];
   error: string;
-  output: string;
+  artifactPath: string;
   dryRun: boolean;
   onCancel: () => void;
   onCleanup: (planId: string) => Promise<string>;
@@ -56,7 +61,7 @@ export function BuildStatus({
   progress,
   logs,
   error,
-  output,
+  artifactPath,
   dryRun,
   onCancel,
   onCleanup,
@@ -67,6 +72,22 @@ export function BuildStatus({
   const [copyFeedback, setCopyFeedback] = useState<CopyFeedback>(idleCopyFeedback);
   const [cleanupFeedback, setCleanupFeedback] = useState<CleanupFeedback>(idleCleanupFeedback);
   const [isCleanupDialogOpen, setIsCleanupDialogOpen] = useState(false);
+  const logViewportRef = useRef<HTMLDivElement>(null);
+  const followLogTailRef = useRef(DEFAULT_FOLLOW_LOG_TAIL);
+
+  useLayoutEffect(() => {
+    if (state === "idle" || state === "validating") {
+      followLogTailRef.current = DEFAULT_FOLLOW_LOG_TAIL;
+    }
+  }, [state]);
+
+  // GeneralsX @feature Codex 05/08/2026 Follow streamed build output until the user deliberately scrolls back.
+  useLayoutEffect(() => {
+    const viewport = logViewportRef.current;
+    if (viewport) {
+      scrollLogToTail(viewport, followLogTailRef.current);
+    }
+  }, [logs]);
 
   if (state === "idle") {
     return null;
@@ -166,7 +187,7 @@ export function BuildStatus({
                       )
                   : copyFeedback.status === "copied"
                     ? copyFeedback.message
-                    : output}
+                    : artifactPath}
               </Alert.Description>
             </Alert.Content>
           </Alert>
@@ -214,19 +235,28 @@ export function BuildStatus({
           </Alert>
         ) : null}
 
-        <section aria-labelledby="build-log-heading" className="space-y-2">
+        <div className="space-y-2">
           <div className="flex items-center justify-between gap-4">
             <h3 className="text-sm font-medium" id="build-log-heading">Plain-text log</h3>
             <span className="text-xs tabular-nums text-muted">{logs.length} lines</span>
           </div>
-          <ScrollShadow className="max-h-72 overflow-y-auto rounded-2xl bg-background p-4">
+          <ScrollShadow
+            ref={logViewportRef}
+            aria-labelledby="build-log-heading"
+            className="max-h-72 overflow-y-auto rounded-2xl bg-background p-4"
+            role="region"
+            tabIndex={0}
+            onScroll={(event) => {
+              followLogTailRef.current = isAtLogTail(event.currentTarget);
+            }}
+          >
             <pre className="min-h-28 whitespace-pre-wrap break-words font-mono text-xs leading-5 text-muted">
               {logs.length > 0
                 ? logs.map((entry) => `${entry.stream === "stderr" ? "[stderr] " : ""}${entry.text}`).join("\n")
                 : "Waiting for builder output…"}
             </pre>
           </ScrollShadow>
-        </section>
+        </div>
       </Card.Content>
 
       <Card.Footer className="flex flex-wrap justify-end gap-3">

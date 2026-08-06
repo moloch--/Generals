@@ -7,6 +7,7 @@ import {Label} from "@heroui/react/label";
 import {TextField} from "@heroui/react/textfield";
 
 import {PathField} from "../components/PathField";
+import {isMacOSBuild} from "../lib/request";
 import type {BuildRequest, BuildRequestUpdater, DirectoryKind} from "../types";
 
 interface GameFilesStepProps {
@@ -17,6 +18,8 @@ interface GameFilesStepProps {
 }
 
 export function GameFilesStep({hostOS, request, onUpdate, onBrowse}: GameFilesStepProps) {
+  const buildsMacOSApplication = isMacOSBuild(request.target, hostOS);
+
   return (
     <Card className="w-full">
       <Card.Header>
@@ -43,24 +46,25 @@ export function GameFilesStep({hostOS, request, onUpdate, onBrowse}: GameFilesSt
             onBrowse={() => onBrowse("assetsDir")}
             onChange={(value) => onUpdate("assetsDir", value)}
           />
-          <PathField
-            description="The self-extracting file is written here after verification."
-            label="SFX output"
-            placeholder="~/GeneralsX/source/build/sfx/GeneralsXZH-sfx"
-            value={request.output}
-            onBrowse={() => onBrowse("output")}
-            onChange={(value) => onUpdate("output", value)}
-          />
-          {request.target === "macos" || (request.target === "auto" && hostOS === "darwin") ? (
+          {buildsMacOSApplication ? (
             <PathField
-              description="macOS also receives a Finder-launchable application bundle."
-              label="macOS app output"
+              description="The branded, Finder-launchable game application is written here after verification."
+              label="macOS application output"
               placeholder="~/GeneralsX/source/build/sfx/GeneralsXZH.app"
               value={request.appOutput}
               onBrowse={() => onBrowse("appOutput")}
               onChange={(value) => onUpdate("appOutput", value)}
             />
-          ) : null}
+          ) : (
+            <PathField
+              description="The self-extracting file is written here after verification."
+              label="SFX output"
+              placeholder="~/GeneralsX/source/build/sfx/GeneralsXZH-sfx"
+              value={request.output}
+              onBrowse={() => onBrowse("output")}
+              onChange={(value) => onUpdate("output", value)}
+            />
+          )}
         </div>
 
         <RadioButtonGroup

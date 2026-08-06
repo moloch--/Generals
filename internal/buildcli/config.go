@@ -146,8 +146,8 @@ func parseConfig(arguments []string, stderr io.Writer) (config, error) {
 	flags.StringVar(&cfg.steamUser, "steam-user", defaults.SteamUser, "Steam account name; SteamCMD prompts for secrets")
 	flags.StringVar(&cfg.cacheDir, "cache-dir", defaults.CacheDirectory, "private dependency/download cache")
 	flags.StringVar(&cfg.steamCMDDir, "steamcmd-dir", "", "SteamCMD installation directory (default: CACHE/steamcmd)")
-	flags.StringVar(&cfg.output, "output", "", "raw SFX output path")
-	flags.StringVar(&cfg.appOutput, "app-output", "", "macOS .app output path")
+	flags.StringVar(&cfg.output, "output", "", "SFX output path (secondary raw launcher for macOS)")
+	flags.StringVar(&cfg.appOutput, "app-output", "", "primary macOS .app output path")
 	flags.BoolVar(&cfg.installDeps, "install-deps", defaults.InstallDependencies, "install missing host build dependencies")
 	flags.BoolVar(&cfg.acceptSDKLicenses, "accept-sdk-licenses", defaults.AcceptSDKLicenses, "accept required SDK/tool licenses during automatic installation")
 	flags.BoolVar(&headless, "headless", false, "run the terminal interface without a graphical frontend")
@@ -271,6 +271,14 @@ func defaultOutput(repoRoot string, targetOS target) string {
 		name = "GeneralsXZH-windows-amd64-sfx.exe"
 	}
 	return filepath.Join(repoRoot, "build", "sfx", name)
+}
+
+// GeneralsX @build Codex 05/08/2026 Present the Finder app as the completed macOS artifact.
+func (cfg config) primaryArtifactPath() string {
+	if cfg.target == targetMacOS {
+		return cfg.appOutput
+	}
+	return cfg.output
 }
 
 func validateConfig(cfg config) error {

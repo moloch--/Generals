@@ -44,7 +44,7 @@ func (a *App) GetBuildCleanupPlan(jobID string) (BuildCleanupPlan, error) {
 	}
 	if desktopArtifact == nil || desktopArtifact.jobID != jobID {
 		a.mu.Unlock()
-		return BuildCleanupPlan{}, errors.New("copy the verified SFX to Desktop before cleaning up build files")
+		return BuildCleanupPlan{}, errors.New("copy the verified build artifact to Desktop before cleaning up build files")
 	}
 	a.cleanupPlanning = true
 	a.preparedCleanup = nil
@@ -54,7 +54,7 @@ func (a *App) GetBuildCleanupPlan(jobID string) (BuildCleanupPlan, error) {
 		a.mu.Lock()
 		a.cleanupPlanning = false
 		a.mu.Unlock()
-		return BuildCleanupPlan{}, fmt.Errorf("revalidate Desktop SFX for cleanup review: %w", err)
+		return BuildCleanupPlan{}, fmt.Errorf("revalidate Desktop build artifact for cleanup review: %w", err)
 	}
 	plan, preparedReceipt, err := prepareBuildCleanup(receipt, desktopArtifact)
 	if err != nil {
@@ -101,7 +101,7 @@ func (a *App) CleanupBuild(jobID, planID string) (string, error) {
 	}
 	if a.copyInProgress {
 		a.mu.Unlock()
-		return "", errors.New("the SFX artifact is still being copied to Desktop")
+		return "", errors.New("the build artifact is still being copied to Desktop")
 	}
 	if a.cleanupPlanning {
 		a.mu.Unlock()
@@ -120,7 +120,7 @@ func (a *App) CleanupBuild(jobID, planID string) (string, error) {
 	}
 	if desktopArtifact == nil || desktopArtifact.jobID != jobID {
 		a.mu.Unlock()
-		return "", errors.New("copy the verified SFX to Desktop before cleaning up build files")
+		return "", errors.New("copy the verified build artifact to Desktop before cleaning up build files")
 	}
 	if prepared == nil || prepared.planID != planID || prepared.sourceReceipt != receipt ||
 		prepared.desktopArtifact != desktopArtifact || prepared.receipt == nil {
@@ -153,13 +153,13 @@ func (a *App) CleanupBuild(jobID, planID string) (string, error) {
 	}()
 
 	if err := revalidateCompletedArtifact(cleanupContext, desktopArtifact); err != nil {
-		return "", fmt.Errorf("revalidate Desktop SFX before cleanup: %w", err)
+		return "", fmt.Errorf("revalidate Desktop build artifact before cleanup: %w", err)
 	}
 	if err := verifyArtifact(cleanupContext, desktopArtifact.sourcePath, prepared.receipt.target); err != nil {
-		return "", fmt.Errorf("verify Desktop SFX before cleanup: %w", err)
+		return "", fmt.Errorf("verify Desktop build artifact before cleanup: %w", err)
 	}
 	if err := revalidateCompletedArtifact(cleanupContext, desktopArtifact); err != nil {
-		return "", fmt.Errorf("revalidate Desktop SFX after verification: %w", err)
+		return "", fmt.Errorf("revalidate Desktop build artifact after verification: %w", err)
 	}
 	result, err := cleanupBuild(cleanupContext, prepared.receipt)
 	if err != nil {
@@ -175,7 +175,7 @@ func (a *App) CleanupBuild(jobID, planID string) (string, error) {
 	}
 	a.mu.Unlock()
 	if postCleanupErr != nil {
-		return "", fmt.Errorf("cleanup completed, but the Desktop SFX could not be revalidated: %w", postCleanupErr)
+		return "", fmt.Errorf("cleanup completed, but the Desktop build artifact could not be revalidated: %w", postCleanupErr)
 	}
 	return result, nil
 }

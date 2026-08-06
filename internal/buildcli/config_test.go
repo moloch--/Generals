@@ -95,6 +95,16 @@ func TestLoadConfigurationDefaults(t *testing.T) {
 	}
 }
 
+func TestPrimaryArtifactPathUsesMacOSApplication(t *testing.T) {
+	t.Parallel()
+	if got := (config{target: targetMacOS, output: "/build/raw-sfx", appOutput: "/build/GeneralsXZH.app"}).primaryArtifactPath(); got != "/build/GeneralsXZH.app" {
+		t.Fatalf("macOS primary artifact = %q", got)
+	}
+	if got := (config{target: targetLinux, output: "/build/linux-sfx"}).primaryArtifactPath(); got != "/build/linux-sfx" {
+		t.Fatalf("Linux primary artifact = %q", got)
+	}
+}
+
 func TestValidateArgumentsAcceptsHeadless(t *testing.T) {
 	t.Parallel()
 	for _, arguments := range [][]string{

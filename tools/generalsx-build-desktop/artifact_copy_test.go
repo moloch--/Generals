@@ -164,7 +164,7 @@ func TestCopyCompletedArtifactCancellationRemovesPartialCopy(t *testing.T) {
 	// The first two checks happen before the temporary file is created; the
 	// third precedes the first read, and the fourth cancels immediately after it.
 	ctx := newCancelAfterChecksContext(3)
-	if _, err := copyCompletedArtifactToDirectory(ctx, completed, desktop); !errors.Is(err, context.Canceled) {
+	if _, err := copyCompletedArtifactToDirectory(ctx, completed, desktop, nil); !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancelled copy error = %v, want context cancellation", err)
 	}
 	entries, err := os.ReadDir(desktop)
@@ -207,7 +207,7 @@ func TestCopyCompletedArtifactRejectsInPlaceContentChangeWithRestoredMetadata(t 
 	}
 	tamperArtifactPreservingMetadata(t, completed, []byte("verified SFX omega"))
 
-	if _, err := copyCompletedArtifactToDirectory(context.Background(), completed, desktop); err == nil ||
+	if _, err := copyCompletedArtifactToDirectory(context.Background(), completed, desktop, nil); err == nil ||
 		!strings.Contains(err.Error(), "contents changed") {
 		t.Fatalf("copy tampered artifact error = %v", err)
 	}

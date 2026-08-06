@@ -6,7 +6,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -67,8 +66,8 @@ func TestCleanupBuildRequiresCopyAndConsumesExactReviewedPlan(t *testing.T) {
 	if !strings.Contains(result, "Removed 2 builder-owned paths") {
 		t.Fatalf("cleanup result = %q", result)
 	}
-	if verifiedTarget != targetForHost(runtime.GOOS) {
-		t.Fatalf("verified target = %q, want %q", verifiedTarget, targetForHost(runtime.GOOS))
+	if verifiedTarget != fileArtifactTestTarget() {
+		t.Fatalf("verified target = %q, want %q", verifiedTarget, fileArtifactTestTarget())
 	}
 	cleanupAssertNotExist(t, request.RepoRoot)
 	cleanupAssertNotExist(t, request.CacheDir)
@@ -84,7 +83,11 @@ func TestCleanupBuildRechecksDesktopDigestAfterVerifier(t *testing.T) {
 	verifierStarted := make(chan struct{})
 	releaseVerifier := make(chan struct{})
 	var cleanupCalled atomic.Bool
+	var verifierCalls atomic.Int32
 	dependencies.verifyArtifact = func(_ context.Context, _ string, _ string) error {
+		if verifierCalls.Add(1) < 3 {
+			return nil
+		}
 		close(verifierStarted)
 		<-releaseVerifier
 		return nil
@@ -226,14 +229,14 @@ func cleanupAppFixture(t *testing.T) (*App, BuildRequest, *appDependencies, *eve
 	recorder := newEventRecorder()
 	app, request, dependencies := testApp(t, recorder)
 	base := t.TempDir()
-	request.Target = "auto"
+	request.Target = fileArtifactTestTarget()
 	request.RepoRoot = filepath.Join(base, "source")
 	request.CacheDir = filepath.Join(base, "cache")
 	request.SteamCMDDir = filepath.Join(request.CacheDir, "steamcmd")
 	request.AssetsDir = filepath.Join(base, "assets")
+	request.AppOutput = ""
 	request.Output = ""
 	request.Output, _ = effectiveArtifactPath(request, dependencies.hostOS)
-	request.AppOutput = filepath.Join(request.RepoRoot, "build", "sfx", "GeneralsXZH.app")
 	request.SkipAssets = true
 	assetSentinel := filepath.Join(request.AssetsDir, "owned.big")
 	cleanupWriteFile(t, assetSentinel, []byte("owned retail fixture"), 0o600)

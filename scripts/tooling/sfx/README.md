@@ -168,6 +168,28 @@ unpacked development build for those workflows.
 | `windows/amd64` | PE32 `generalszh.exe`, complete runtime DLL set as ordinary files, owned retail Bink/Miles DLLs, and retail assets | Native MSVC retail-sized SFX build, full payload verification, and headless startup through Direct3D pass on Windows; rendered gameplay remains exploratory |
 | `windows/386` | Same Windows/x86 stage, with a 32-bit Go wrapper | Small fixture cross-builds pass; a retail-sized `go:embed` payload is not recommended in a 32-bit address space |
 
+### Platform icon contract
+
+The icon-capable SFX shells use the canonical GeneralsXZH artwork. The macOS
+integrated build generates and signs `GeneralsXZH.app` with a Retina `.icns`.
+Windows AMD64 and 386 launchers include a six-size `RT_GROUP_ICON` resource;
+the cold-cache progress window loads group ID 1 from that same executable and
+falls back to the Windows application icon only if the resource cannot load.
+
+The GUI Automated Build Tool treats the Finder-ready `GeneralsXZH.app` as the
+primary personal macOS artifact and copies the whole bundle to the Desktop. Its
+raw SFX remains available separately and as
+`GeneralsXZH.app/Contents/MacOS/GeneralsXZH` for terminal and headless use.
+Generated SFX executables and game app bundles contain retail data and are never
+Automated Build Tool release assets.
+
+A raw Linux ELF executable has no standardized embedded icon that GNOME and
+KDE consume. Keep the Linux SFX as the direct console-compatible executable,
+and use `assets/generalsx-zh_icon.png` from an AppImage, Flatpak, or installed
+`.desktop` wrapper when a graphical shell icon is needed. Custom ELF sections
+and file-manager-specific extended attributes are intentionally not treated as
+portable icon support.
+
 The integrated native MSVC packager links the fetched static D3DX archive,
 requires and preserves the user's retail `binkw32.dll` and `mss32.dll`, and
 validates the complete non-system PE dependency closure before packing. It

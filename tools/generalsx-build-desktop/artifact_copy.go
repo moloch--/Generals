@@ -17,6 +17,7 @@ const desktopCopyNameAttempts = 1000
 
 type completedArtifact struct {
 	jobID        string
+	target       string
 	sourcePath   string
 	sourceInfo   fs.FileInfo
 	sourceSHA256 [sha256.Size]byte
@@ -27,6 +28,22 @@ func inspectCompletedArtifact(jobID, sourcePath string) (*completedArtifact, err
 }
 
 func inspectCompletedArtifactContext(ctx context.Context, jobID, sourcePath string) (*completedArtifact, error) {
+	pathInfo, err := os.Lstat(sourcePath)
+	if err != nil {
+		return nil, fmt.Errorf("inspect source artifact: %w", err)
+	}
+	if pathInfo.IsDir() {
+		if err := validateBundleArtifactRoot(sourcePath, pathInfo); err != nil {
+			return nil, err
+		}
+		digest, err := hashStableBundleArtifact(ctx, sourcePath, pathInfo)
+		if err != nil {
+			return nil, fmt.Errorf("hash source application bundle: %w", err)
+		}
+		return &completedArtifact{
+			jobID: jobID, sourcePath: sourcePath, sourceInfo: pathInfo, sourceSHA256: digest,
+		}, nil
+	}
 	source, info, err := openStableArtifact(sourcePath)
 	if err != nil {
 		return nil, err
@@ -71,6 +88,16 @@ func revalidateCompletedArtifact(ctx context.Context, completed *completedArtifa
 	}
 	if err := ctx.Err(); err != nil {
 		return err
+	}
+	if completed.sourceInfo.IsDir() {
+		digest, err := hashStableBundleArtifact(ctx, completed.sourcePath, completed.sourceInfo)
+		if err != nil {
+			return fmt.Errorf("hash recorded application bundle: %w", err)
+		}
+		if digest != completed.sourceSHA256 {
+			return errors.New("application bundle contents changed after it was recorded")
+		}
+		return nil
 	}
 	source, currentInfo, err := openStableArtifact(completed.sourcePath)
 	if err != nil {
@@ -164,11 +191,11 @@ func (a *App) CopyBuildArtifactToDesktop(jobID string) (string, error) {
 	completed := a.completedArtifact
 	if completed == nil || completed.jobID != jobID {
 		a.mu.Unlock()
-		return "", errors.New("no verified SFX artifact is available for this build")
+		return "", errors.New("no verified build artifact is available for this build")
 	}
 	if a.copyInProgress {
 		a.mu.Unlock()
-		return "", errors.New("the SFX artifact is already being copied to Desktop")
+		return "", errors.New("the build artifact is already being copied to Desktop")
 	}
 	if a.cleanupPlanning {
 		a.mu.Unlock()
@@ -187,6 +214,11 @@ func (a *App) CopyBuildArtifactToDesktop(jobID string) (string, error) {
 	if copyArtifact == nil {
 		a.mu.Unlock()
 		return "", errors.New("Desktop artifact copier is unavailable")
+	}
+	verifyArtifact := a.dependencies.verifyArtifact
+	if verifyArtifact == nil {
+		a.mu.Unlock()
+		return "", errors.New("Desktop artifact verification is unavailable")
 	}
 	if a.ctx == nil {
 		a.mu.Unlock()
@@ -218,19 +250,20 @@ func (a *App) CopyBuildArtifactToDesktop(jobID string) (string, error) {
 	if err := copyContext.Err(); err != nil {
 		return "", err
 	}
-	destination, err := copyArtifact(copyContext, completed, desktop)
+	destination, err := copyArtifact(copyContext, completed, desktop, verifyArtifact)
 	if err != nil {
-		return "", fmt.Errorf("copy SFX to Desktop: %w", err)
+		return "", fmt.Errorf("copy build artifact to Desktop: %w", err)
 	}
-	if err := copyContext.Err(); err != nil {
-		return "", err
-	}
-	desktopArtifact, err := inspectCompletedArtifactContext(copyContext, jobID, destination)
+	// Publication is the commit point: finish recording the already-verified
+	// inode even if cancellation arrives immediately after its atomic rename.
+	recordContext := context.WithoutCancel(copyContext)
+	desktopArtifact, err := inspectCompletedArtifactContext(recordContext, jobID, destination)
 	if err != nil {
-		return "", fmt.Errorf("verify Desktop SFX copy: %w", err)
+		return "", fmt.Errorf("inspect Desktop build artifact: %w", err)
 	}
+	desktopArtifact.target = completed.target
 	if desktopArtifact.sourceSHA256 != completed.sourceSHA256 {
-		return "", errors.New("Desktop SFX copy does not match the completed build artifact")
+		return "", errors.New("Desktop copy does not match the completed build artifact")
 	}
 	a.mu.Lock()
 	if a.completedArtifact != completed {
@@ -248,10 +281,15 @@ func copyArtifactToDirectory(sourcePath, destinationDirectory string) (string, e
 	if err != nil {
 		return "", err
 	}
-	return copyCompletedArtifactToDirectory(context.Background(), completed, destinationDirectory)
+	return copyCompletedArtifactToDirectory(context.Background(), completed, destinationDirectory, nil)
 }
 
-func copyCompletedArtifactToDirectory(ctx context.Context, completed *completedArtifact, destinationDirectory string) (destination string, err error) {
+func copyCompletedArtifactToDirectory(
+	ctx context.Context,
+	completed *completedArtifact,
+	destinationDirectory string,
+	verifyArtifact verifyArtifactFunc,
+) (destination string, err error) {
 	if err := ctx.Err(); err != nil {
 		return "", err
 	}
@@ -261,6 +299,12 @@ func copyCompletedArtifactToDirectory(ctx context.Context, completed *completedA
 	}
 	if err := ctx.Err(); err != nil {
 		return "", err
+	}
+	if completed == nil {
+		return "", errors.New("completed artifact is unavailable")
+	}
+	if completed.sourceInfo.IsDir() {
+		return copyCompletedBundleToDirectory(ctx, completed, destinationDirectory, verifyArtifact)
 	}
 
 	currentInfo, err := os.Lstat(completed.sourcePath)
@@ -286,10 +330,14 @@ func copyCompletedArtifactToDirectory(ctx context.Context, completed *completedA
 	exactDestination := filepath.Join(destinationDirectory, baseName)
 	if destinationInfo, statErr := os.Lstat(exactDestination); statErr == nil &&
 		destinationInfo.Mode()&os.ModeSymlink == 0 && os.SameFile(openedInfo, destinationInfo) {
+		if err := verifyArtifactBeforePublication(ctx, completed, exactDestination, verifyArtifact); err != nil {
+			return "", err
+		}
 		return exactDestination, nil
 	}
 
-	temporary, err := os.CreateTemp(destinationDirectory, ".generalsx-copy-*.tmp")
+	temporaryPattern := ".generalsx-copy-*" + filepath.Ext(baseName)
+	temporary, err := os.CreateTemp(destinationDirectory, temporaryPattern)
 	if err != nil {
 		return "", fmt.Errorf("create temporary Desktop copy: %w", err)
 	}
@@ -307,6 +355,9 @@ func copyCompletedArtifactToDirectory(ctx context.Context, completed *completedA
 	if err := writeTemporaryArtifact(ctx, source, completed, temporary); err != nil {
 		return "", err
 	}
+	if err := verifyArtifactBeforePublication(ctx, completed, temporaryPath, verifyArtifact); err != nil {
+		return "", err
+	}
 	for attempt := 0; attempt < desktopCopyNameAttempts; attempt++ {
 		if err := ctx.Err(); err != nil {
 			return "", err
@@ -320,6 +371,33 @@ func copyCompletedArtifactToDirectory(ctx context.Context, completed *completedA
 		}
 	}
 	return "", fmt.Errorf("could not choose an unused filename after %d attempts", desktopCopyNameAttempts)
+}
+
+// GeneralsX @bugfix Codex 05/08/2026 Verify the private Desktop sibling before its no-replace publication.
+func verifyArtifactBeforePublication(
+	ctx context.Context,
+	completed *completedArtifact,
+	path string,
+	verifyArtifact verifyArtifactFunc,
+) error {
+	temporary, err := inspectCompletedArtifactContext(ctx, completed.jobID, path)
+	if err != nil {
+		return fmt.Errorf("inspect temporary Desktop artifact: %w", err)
+	}
+	temporary.target = completed.target
+	if temporary.sourceSHA256 != completed.sourceSHA256 {
+		return errors.New("temporary Desktop artifact does not match the completed build")
+	}
+	if verifyArtifact == nil {
+		return nil
+	}
+	if err := verifyArtifact(ctx, path, completed.target); err != nil {
+		return fmt.Errorf("verify temporary Desktop artifact: %w", err)
+	}
+	if err := revalidateCompletedArtifact(ctx, temporary); err != nil {
+		return fmt.Errorf("revalidate temporary Desktop artifact: %w", err)
+	}
+	return nil
 }
 
 func desktopCopyPath(directory, baseName string, attempt int) string {

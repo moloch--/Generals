@@ -97,8 +97,18 @@ func targetForHost(hostOS string) string {
 	}
 }
 
+// GeneralsX @bugfix Codex 05/08/2026 Keep the hidden macOS raw launcher on its safe deterministic intermediate path.
+func normalizeDesktopBuildRequest(request BuildRequest, hostOS string) BuildRequest {
+	target, err := resolveTarget(request.Target, hostOS)
+	if err == nil && target == "macos" {
+		request.Output = filepath.Join(request.RepoRoot, "build", "sfx", "GeneralsXZH-macos-arm64-sfx")
+	}
+	return request
+}
+
 // GeneralsX @build Codex 05/08/2026 Validate desktop input before starting irreversible or interactive host setup.
 func (a *App) ValidateBuild(request BuildRequest) []ValidationIssue {
+	request = normalizeDesktopBuildRequest(request, a.dependencies.hostOS)
 	issues := make([]ValidationIssue, 0)
 	errorIssue := func(field, message string) {
 		issues = append(issues, ValidationIssue{Field: field, Message: message, Severity: "error"})
@@ -192,18 +202,23 @@ func resolveTarget(value, hostOS string) (string, error) {
 	}
 }
 
-// GeneralsX @bugfix Codex 05/08/2026 Mirror the CLI's blank-output defaults when recording the completed GUI artifact.
+// GeneralsX @bugfix Codex 05/08/2026 Record the platform-native artifact exposed by the GUI.
 func effectiveArtifactPath(request BuildRequest, hostOS string) (string, error) {
 	target, err := resolveTarget(request.Target, hostOS)
 	if err != nil {
 		return "", err
 	}
+	if target == "macos" {
+		output := request.AppOutput
+		if output == "" {
+			output = filepath.Join(request.RepoRoot, "build", "sfx", "GeneralsXZH.app")
+		}
+		return filepath.Abs(output)
+	}
 	output := request.Output
 	if output == "" {
 		name := "GeneralsXZH-linux-amd64-sfx"
 		switch target {
-		case "macos":
-			name = "GeneralsXZH-macos-arm64-sfx"
 		case "windows":
 			name = "GeneralsXZH-windows-amd64-sfx.exe"
 		}

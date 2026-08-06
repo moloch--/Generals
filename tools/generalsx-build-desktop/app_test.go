@@ -79,6 +79,7 @@ func testApp(t *testing.T, recorder *eventRecorder) (*App, BuildRequest, *appDep
 	dependencies.stdout = io.Discard
 	dependencies.stderr = io.Discard
 	dependencies.newJobID = func() string { return "job-fixture" }
+	dependencies.verifyArtifact = func(context.Context, string, string) error { return nil }
 	dependencies.shutdownTimeout = time.Second
 	app := newApp(dependencies)
 	app.startup(context.Background())
@@ -87,9 +88,22 @@ func testApp(t *testing.T, recorder *eventRecorder) (*App, BuildRequest, *appDep
 		t.Fatal(err)
 	}
 	request := defaults.Request
+	request.Target = fileArtifactTestTarget()
+	request.AppOutput = ""
 	request.SkipAssets = true
-	request.Output = filepath.Join(t.TempDir(), "GeneralsXZH-sfx")
+	outputName := "GeneralsXZH-sfx"
+	if request.Target == "windows" {
+		outputName += ".exe"
+	}
+	request.Output = filepath.Join(t.TempDir(), outputName)
 	return app, request, &dependencies
+}
+
+func fileArtifactTestTarget() string {
+	if runtime.GOOS == "windows" {
+		return "windows"
+	}
+	return "linux"
 }
 
 func TestStartBuildStreamsStructuredProgressAndLogs(t *testing.T) {
@@ -126,13 +140,25 @@ func TestStartBuildStreamsStructuredProgressAndLogs(t *testing.T) {
 		t.Fatalf("arguments = %q", capturedArguments)
 	}
 	streams := map[string]bool{}
+	sawVerification := false
 	for _, event := range recorder.snapshot() {
 		if logEvent, ok := event.payload.(LogEvent); ok {
 			streams[logEvent.Stream] = true
 		}
+		if progressEvent, ok := event.payload.(ProgressEvent); ok && progressEvent.Status == "running" {
+			if progressEvent.Phase == "complete" || progressEvent.Percent == 100 {
+				t.Fatalf("builder exposed terminal progress before verification: %#v", progressEvent)
+			}
+			if progressEvent.Phase == "verify" && progressEvent.Percent == 95 {
+				sawVerification = true
+			}
+		}
 	}
 	if !streams["stdout"] || !streams["stderr"] {
 		t.Fatalf("log streams = %#v", streams)
+	}
+	if !sawVerification {
+		t.Fatal("build did not expose the post-package verification phase")
 	}
 }
 
@@ -391,6 +417,116 @@ func TestCopyBuildArtifactToDesktopCopiesOnlyTheMatchingSuccessfulBuild(t *testi
 	}
 }
 
+func TestMacOSBuildPublishesVerifiedApplicationBundle(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("macOS application builds require a Darwin host")
+	}
+	recorder := newEventRecorder()
+	app, request, dependencies := testApp(t, recorder)
+	workspace := t.TempDir()
+	desktop := filepath.Join(workspace, "Desktop")
+	if err := os.Mkdir(desktop, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	request.Target = "macos"
+	request.RepoRoot = filepath.Join(workspace, "source")
+	request.CacheDir = filepath.Join(workspace, "cache")
+	request.SteamCMDDir = filepath.Join(request.CacheDir, "steamcmd")
+	request.AssetsDir = filepath.Join(workspace, "owned", "assets")
+	request.Output = filepath.Join(request.RepoRoot, "build", "sfx", "GeneralsXZH-macos-arm64-sfx")
+	request.AppOutput = filepath.Join(request.RepoRoot, "build", "sfx", "GeneralsXZH.app")
+	cleanupCreateSimulatedRepo(t, request.RepoRoot)
+	dependencies.desktopDirectory = func() (string, error) { return desktop, nil }
+	dependencies.builder = func(_ context.Context, _ []string, _ io.Reader, _, _ io.Writer, _ buildcli.RunOptions) int {
+		if err := os.MkdirAll(filepath.Dir(request.Output), 0o755); err != nil {
+			t.Errorf("create SFX output directory: %v", err)
+			return 1
+		}
+		if err := os.WriteFile(request.Output, []byte("secondary raw SFX"), 0o751); err != nil {
+			t.Errorf("write raw SFX: %v", err)
+			return 1
+		}
+		if err := createArtifactBundleFixture(request.AppOutput); err != nil {
+			t.Errorf("write application bundle: %v", err)
+			return 1
+		}
+		return 0
+	}
+	var verifiedPaths []string
+	dependencies.verifyArtifact = func(_ context.Context, path, target string) error {
+		if target != "macos" {
+			t.Errorf("verified target = %q, want macos", target)
+		}
+		verifiedPaths = append(verifiedPaths, path)
+		return nil
+	}
+	app.dependencies = *dependencies
+
+	jobID, err := app.StartBuild(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	recorder.waitForProgress(t, "success")
+	app.mu.Lock()
+	recordedPath := app.completedArtifact.sourcePath
+	app.mu.Unlock()
+	if recordedPath != request.AppOutput {
+		t.Fatalf("recorded artifact = %q, want %q", recordedPath, request.AppOutput)
+	}
+	destination, err := app.CopyBuildArtifactToDesktop(jobID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := filepath.Join(desktop, "GeneralsXZH.app"); destination != want {
+		t.Fatalf("Desktop artifact = %q, want %q", destination, want)
+	}
+	if len(verifiedPaths) != 2 || verifiedPaths[0] != request.AppOutput {
+		t.Fatalf("verified paths = %q", verifiedPaths)
+	}
+	if filepath.Dir(verifiedPaths[1]) != desktop ||
+		!strings.HasPrefix(filepath.Base(verifiedPaths[1]), ".generalsx-copy-") ||
+		filepath.Ext(verifiedPaths[1]) != ".app" {
+		t.Fatalf("Desktop verifier did not receive the private app sibling: %q", verifiedPaths[1])
+	}
+	if _, err := os.Stat(filepath.Join(destination, "Contents", "Resources", "GeneralsXZH.icns")); err != nil {
+		t.Fatalf("Desktop application icon missing: %v", err)
+	}
+	plan, err := app.GetBuildCleanupPlan(jobID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	canonicalOutput, err := cleanupCanonicalFuturePath(request.Output)
+	if err != nil {
+		t.Fatal(err)
+	}
+	canonicalApp, err := cleanupCanonicalFuturePath(request.AppOutput)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantCleanup := map[string]bool{canonicalOutput: false, canonicalApp: false}
+	for _, entry := range plan.Entries {
+		if _, tracked := wantCleanup[entry.Path]; tracked {
+			wantCleanup[entry.Path] = true
+		}
+	}
+	for path, found := range wantCleanup {
+		if !found {
+			t.Fatalf("cleanup plan omitted generated artifact %q: %#v", path, plan.Entries)
+		}
+	}
+	if _, err := app.CleanupBuild(jobID, plan.PlanID); err != nil {
+		t.Fatal(err)
+	}
+	for path := range wantCleanup {
+		if _, err := os.Lstat(path); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("generated artifact remains after cleanup at %q: %v", path, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(destination, "Contents", "Resources", "GeneralsXZH.icns")); err != nil {
+		t.Fatalf("cleanup removed the Desktop application: %v", err)
+	}
+}
+
 func TestCopyBuildArtifactToDesktopRejectsDryRunAndFailure(t *testing.T) {
 	t.Parallel()
 	for _, test := range []struct {
@@ -447,6 +583,43 @@ func TestSuccessfulBuilderWithoutArtifactReportsFailure(t *testing.T) {
 	}
 }
 
+// GeneralsX @test Codex 05/08/2026 Do not trust an artifact verifier that mutates bytes while preserving visible metadata.
+func TestSuccessfulBuildRejectsArtifactChangedByVerifier(t *testing.T) {
+	t.Parallel()
+	recorder := newEventRecorder()
+	app, request, dependencies := testApp(t, recorder)
+	dependencies.builder = func(_ context.Context, _ []string, _ io.Reader, _, _ io.Writer, _ buildcli.RunOptions) int {
+		if err := os.WriteFile(request.Output, []byte("original SFX"), 0o700); err != nil {
+			t.Errorf("write source artifact: %v", err)
+			return 1
+		}
+		return 0
+	}
+	dependencies.verifyArtifact = func(_ context.Context, path, _ string) error {
+		info, err := os.Stat(path)
+		if err != nil {
+			return err
+		}
+		if err := os.WriteFile(path, []byte("tampered SFX"), info.Mode().Perm()); err != nil {
+			return err
+		}
+		return os.Chtimes(path, info.ModTime(), info.ModTime())
+	}
+	app.dependencies = *dependencies
+
+	jobID, err := app.StartBuild(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	progress := recorder.waitForProgress(t, "error")
+	if !strings.Contains(progress.Message, "changed during verification") {
+		t.Fatalf("terminal progress = %#v", progress)
+	}
+	if _, err := app.CopyBuildArtifactToDesktop(jobID); err == nil {
+		t.Fatal("artifact changed by verifier became eligible for Desktop copying")
+	}
+}
+
 func TestCopyBuildArtifactToDesktopRejectsChangedArtifact(t *testing.T) {
 	t.Parallel()
 	recorder := newEventRecorder()
@@ -475,6 +648,64 @@ func TestCopyBuildArtifactToDesktopRejectsChangedArtifact(t *testing.T) {
 	}
 	if _, err := app.CopyBuildArtifactToDesktop(jobID); err == nil || !strings.Contains(err.Error(), "changed") {
 		t.Fatalf("changed artifact copy error = %v", err)
+	}
+}
+
+// GeneralsX @test Codex 05/08/2026 A failed verifier must never publish or duplicate a Desktop artifact.
+func TestCopyBuildArtifactVerifierFailureLeavesDesktopUnchanged(t *testing.T) {
+	t.Parallel()
+	recorder := newEventRecorder()
+	app, request, dependencies := testApp(t, recorder)
+	desktop := t.TempDir()
+	dependencies.desktopDirectory = func() (string, error) { return desktop, nil }
+	dependencies.builder = func(_ context.Context, _ []string, _ io.Reader, _, _ io.Writer, _ buildcli.RunOptions) int {
+		if err := os.WriteFile(request.Output, []byte("verified SFX"), 0o700); err != nil {
+			t.Errorf("write source artifact: %v", err)
+			return 1
+		}
+		return 0
+	}
+	var verifierMu sync.Mutex
+	verificationCount := 0
+	var rejectedPaths []string
+	dependencies.verifyArtifact = func(_ context.Context, path, _ string) error {
+		verifierMu.Lock()
+		defer verifierMu.Unlock()
+		verificationCount++
+		if verificationCount == 1 {
+			return nil
+		}
+		rejectedPaths = append(rejectedPaths, path)
+		return errors.New("fixture Desktop verification failure")
+	}
+	app.dependencies = *dependencies
+
+	jobID, err := app.StartBuild(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	recorder.waitForProgress(t, "success")
+	for attempt := 0; attempt < 2; attempt++ {
+		if _, err := app.CopyBuildArtifactToDesktop(jobID); err == nil || !strings.Contains(err.Error(), "fixture Desktop verification failure") {
+			t.Fatalf("copy attempt %d error = %v", attempt+1, err)
+		}
+		entries, err := os.ReadDir(desktop)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(entries) != 0 {
+			t.Fatalf("Desktop entries after rejected copy %d = %v, want none", attempt+1, entries)
+		}
+	}
+	verifierMu.Lock()
+	defer verifierMu.Unlock()
+	if len(rejectedPaths) != 2 {
+		t.Fatalf("rejected verifier paths = %q, want two", rejectedPaths)
+	}
+	for _, path := range rejectedPaths {
+		if !strings.HasPrefix(filepath.Base(path), ".generalsx-copy-") {
+			t.Fatalf("verifier received published path %q instead of a private sibling", path)
+		}
 	}
 }
 
@@ -564,7 +795,7 @@ func TestShutdownCancelsAndWaitsForDesktopCopy(t *testing.T) {
 		}
 		return 0
 	}
-	dependencies.copyArtifact = func(ctx context.Context, _ *completedArtifact, _ string) (string, error) {
+	dependencies.copyArtifact = func(ctx context.Context, _ *completedArtifact, _ string, _ verifyArtifactFunc) (string, error) {
 		close(copyStarted)
 		<-ctx.Done()
 		close(copyStopped)

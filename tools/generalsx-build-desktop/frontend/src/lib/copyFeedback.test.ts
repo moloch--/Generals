@@ -13,12 +13,12 @@ describe("runDesktopCopy", () => {
 
     const operation = runDesktopCopy(() => copy, (feedback) => states.push(feedback));
     expect(states).toEqual([{status: "pending", message: ""}]);
-    finishCopy("/Users/commander/Desktop/GeneralsXZH-sfx");
+    finishCopy("/Users/commander/Desktop/GeneralsXZH.app");
     await operation;
 
     expect(states).toEqual([
       {status: "pending", message: ""},
-      {status: "copied", message: "/Users/commander/Desktop/GeneralsXZH-sfx"},
+      {status: "copied", message: "/Users/commander/Desktop/GeneralsXZH.app"},
     ]);
   });
 

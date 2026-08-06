@@ -4,11 +4,14 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"debug/pe"
+	"encoding/binary"
 	"encoding/hex"
 	"errors"
 	"io"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"runtime"
@@ -23,6 +26,182 @@ import (
 	"github.com/moloch--/Generals/scripts/tooling/sfx/internal/payload"
 	"github.com/ulikunitz/xz"
 )
+
+func TestWindowsLaunchersEmbedGeneralsIcon(t *testing.T) {
+	iconContents, err := os.ReadFile("generalsxzh.ico")
+	if err != nil {
+		t.Fatal(err)
+	}
+	canonicalIconContents, err := os.ReadFile(filepath.Join(
+		"..", "..", "..", "..", "..", "tools", "generalsx-build-desktop", "build", "windows", "icon.ico",
+	))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(iconContents, canonicalIconContents) {
+		t.Fatal("Windows SFX icon does not match the canonical Automated Build Tool icon")
+	}
+	const wantIconSHA256 = "1f034656dcfcf24899abe765eaf497c1faceb91066cd10b6114dd5bc3e613b6e"
+	iconSHA256 := sha256.Sum256(iconContents)
+	if got := hex.EncodeToString(iconSHA256[:]); got != wantIconSHA256 {
+		t.Fatalf("Generals icon SHA-256 = %s, want %s", got, wantIconSHA256)
+	}
+	iconImages := windowsIconImages(t, iconContents)
+	resourceDefinition, err := os.ReadFile("windows_resources.rc")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(resourceDefinition, []byte(`1 ICON "generalsxzh.ico"`)) {
+		t.Fatal("Windows resource definition does not expose the Generals icon as group ID 1")
+	}
+
+	tests := []struct {
+		arch    string
+		machine uint16
+	}{
+		{arch: "amd64", machine: pe.IMAGE_FILE_MACHINE_AMD64},
+		{arch: "386", machine: pe.IMAGE_FILE_MACHINE_I386},
+	}
+	for _, test := range tests {
+		t.Run(test.arch, func(t *testing.T) {
+			output := filepath.Join(t.TempDir(), "GeneralsXZH-sfx.exe")
+			command := exec.Command(
+				"go", "build", "-buildvcs=false", "-trimpath", "-o", output, ".",
+			)
+			command.Env = windowsLauncherTestEnvironment(test.arch)
+			if buildOutput, err := command.CombinedOutput(); err != nil {
+				t.Fatalf("cross-build Windows/%s SFX launcher: %v\n%s", test.arch, err, buildOutput)
+			}
+
+			executable, err := pe.Open(output)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer executable.Close()
+			if executable.FileHeader.Machine != test.machine {
+				t.Fatalf("PE machine = %#x, want %#x", executable.FileHeader.Machine, test.machine)
+			}
+			resource := executable.Section(".rsrc")
+			if resource == nil || resource.Size == 0 {
+				t.Fatal("Windows SFX launcher has no icon resource section")
+			}
+			resourceContents, err := resource.Data()
+			if err != nil {
+				t.Fatal(err)
+			}
+			for index, iconImage := range iconImages {
+				if !bytes.Contains(resourceContents, iconImage) {
+					t.Fatalf("Windows SFX resource section does not contain canonical icon image %d", index)
+				}
+			}
+			if !hasPEResource(resourceContents, 14, 1) {
+				t.Fatal("Windows SFX resource section does not expose RT_GROUP_ICON ID 1")
+			}
+		})
+	}
+}
+
+func windowsIconImages(t *testing.T, contents []byte) [][]byte {
+	t.Helper()
+	if len(contents) < 6 || binary.LittleEndian.Uint16(contents[0:2]) != 0 ||
+		binary.LittleEndian.Uint16(contents[2:4]) != 1 {
+		t.Fatal("Generals Windows icon has an invalid ICO header")
+	}
+	count := int(binary.LittleEndian.Uint16(contents[4:6]))
+	if count != 6 || len(contents) < 6+count*16 {
+		t.Fatalf("Generals Windows icon contains %d images, want 6", count)
+	}
+	wantDimensions := map[int]bool{16: true, 32: true, 48: true, 64: true, 128: true, 256: true}
+	images := make([][]byte, 0, count)
+	for index := 0; index < count; index++ {
+		entry := contents[6+index*16 : 6+(index+1)*16]
+		width := int(entry[0])
+		height := int(entry[1])
+		if width == 0 {
+			width = 256
+		}
+		if height == 0 {
+			height = 256
+		}
+		if width != height || !wantDimensions[width] {
+			t.Fatalf("Generals Windows icon image %d is %dx%d", index, width, height)
+		}
+		imageSize := int(binary.LittleEndian.Uint32(entry[8:12]))
+		imageOffset := int(binary.LittleEndian.Uint32(entry[12:16]))
+		if imageSize <= 0 || imageOffset < 0 || imageOffset > len(contents)-imageSize {
+			t.Fatalf("Generals Windows icon image %d has an invalid payload range", index)
+		}
+		images = append(images, contents[imageOffset:imageOffset+imageSize])
+		delete(wantDimensions, width)
+	}
+	if len(wantDimensions) != 0 {
+		t.Fatalf("Generals Windows icon is missing dimensions: %v", wantDimensions)
+	}
+	return images
+}
+
+func hasPEResource(contents []byte, resourceType, resourceID uint16) bool {
+	typeDirectory, found := peResourceDirectoryEntry(contents, 0, resourceType)
+	if !found || typeDirectory&0x80000000 == 0 {
+		return false
+	}
+	_, found = peResourceDirectoryEntry(contents, typeDirectory&0x7fffffff, resourceID)
+	return found
+}
+
+func peResourceDirectoryEntry(contents []byte, offset uint32, identifier uint16) (uint32, bool) {
+	start := int(offset)
+	if start < 0 || start+16 > len(contents) {
+		return 0, false
+	}
+	named := int(binary.LittleEndian.Uint16(contents[start+12 : start+14]))
+	numeric := int(binary.LittleEndian.Uint16(contents[start+14 : start+16]))
+	entryStart := start + 16
+	entryEnd := entryStart + (named+numeric)*8
+	if entryEnd < entryStart || entryEnd > len(contents) {
+		return 0, false
+	}
+	for cursor := entryStart; cursor < entryEnd; cursor += 8 {
+		name := binary.LittleEndian.Uint32(contents[cursor : cursor+4])
+		if name&0x80000000 == 0 && name == uint32(identifier) {
+			return binary.LittleEndian.Uint32(contents[cursor+4 : cursor+8]), true
+		}
+	}
+	return 0, false
+}
+
+func windowsLauncherTestEnvironment(arch string) []string {
+	overrides := map[string]string{
+		"CGO_ENABLED":  "0",
+		"GOARCH":       arch,
+		"GOENV":        "off",
+		"GOEXPERIMENT": "",
+		"GOFLAGS":      "",
+		"GOOS":         "windows",
+		"GOTOOLCHAIN":  "local",
+		"GOWORK":       "off",
+	}
+	if arch == "amd64" {
+		overrides["GOAMD64"] = "v1"
+	} else {
+		overrides["GO386"] = "sse2"
+	}
+
+	environment := make([]string, 0, len(os.Environ())+len(overrides))
+	for _, entry := range os.Environ() {
+		key, _, found := strings.Cut(entry, "=")
+		if !found {
+			continue
+		}
+		if _, overridden := overrides[key]; !overridden {
+			environment = append(environment, entry)
+		}
+	}
+	for key, value := range overrides {
+		environment = append(environment, key+"="+value)
+	}
+	return environment
+}
 
 func TestParseActionForwardsGameArgumentsWithoutInterpretation(t *testing.T) {
 	// GeneralsX @feature Codex 01/08/2026 Keep the Online endpoint override intact through standalone launchers.

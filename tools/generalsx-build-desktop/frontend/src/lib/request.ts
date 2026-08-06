@@ -61,6 +61,15 @@ export function normalizeBuildRequest(request: BuildRequest): BuildRequest {
   return normalized;
 }
 
+// GeneralsX @feature Codex 05/08/2026 Present the branded app as the primary artifact for macOS GUI builds.
+export function isMacOSBuild(target: BuildRequest["target"], hostOS: string): boolean {
+  return target === "macos" || (target === "auto" && hostOS === "darwin");
+}
+
+export function primaryArtifactPath(request: BuildRequest, hostOS: string): string {
+  return isMacOSBuild(request.target, hostOS) ? request.appOutput : request.output;
+}
+
 export function isOnlineEndpointValid(value: string): boolean {
   if (value === "") {
     return true;
@@ -75,6 +84,7 @@ export function validateWizardStep(
   step: number,
   request: BuildRequest,
   legalAcknowledged = false,
+  hostOS = "",
 ): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
 
@@ -89,11 +99,10 @@ export function validateWizardStep(
     if (!request.assetsDir.trim()) {
       issues.push({field: "assetsDir", message: "Choose the retail Zero Hour data directory."});
     }
-    if (!request.output.trim()) {
-      issues.push({field: "output", message: "Choose an SFX output path."});
-    }
-    if (request.target === "macos" && !request.appOutput.trim()) {
+    if (isMacOSBuild(request.target, hostOS) && !request.appOutput.trim()) {
       issues.push({field: "appOutput", message: "Choose a macOS application output path."});
+    } else if (!isMacOSBuild(request.target, hostOS) && !request.output.trim()) {
+      issues.push({field: "output", message: "Choose an SFX output path."});
     }
   }
 
@@ -131,8 +140,12 @@ export function validateWizardStep(
   return issues;
 }
 
-export function validateAllSteps(request: BuildRequest, legalAcknowledged: boolean): ValidationIssue[] {
-  return [0, 1, 2, 3].flatMap((step) => validateWizardStep(step, request, legalAcknowledged));
+export function validateAllSteps(
+  request: BuildRequest,
+  legalAcknowledged: boolean,
+  hostOS = "",
+): ValidationIssue[] {
+  return [0, 1, 2, 3].flatMap((step) => validateWizardStep(step, request, legalAcknowledged, hostOS));
 }
 
 export function targetLabel(target: BuildRequest["target"]): string {

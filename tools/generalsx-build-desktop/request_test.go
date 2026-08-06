@@ -18,7 +18,7 @@ func TestEffectiveArtifactPathMatchesCLIBlankOutputDefaults(t *testing.T) {
 		target string
 		file   string
 	}{
-		{name: "automatic macOS", hostOS: "darwin", target: "auto", file: "GeneralsXZH-macos-arm64-sfx"},
+		{name: "automatic macOS", hostOS: "darwin", target: "auto", file: "GeneralsXZH.app"},
 		{name: "explicit Linux on macOS", hostOS: "darwin", target: "linux", file: "GeneralsXZH-linux-amd64-sfx"},
 		{name: "automatic Windows", hostOS: "windows", target: "auto", file: "GeneralsXZH-windows-amd64-sfx.exe"},
 	} {
@@ -32,6 +32,43 @@ func TestEffectiveArtifactPathMatchesCLIBlankOutputDefaults(t *testing.T) {
 				t.Fatalf("effective artifact = %q, want %q", path, want)
 			}
 		})
+	}
+}
+
+func TestEffectiveArtifactPathUsesCustomMacOSAppOutput(t *testing.T) {
+	t.Parallel()
+	want := filepath.Join(t.TempDir(), "Command Center.app")
+	path, err := effectiveArtifactPath(BuildRequest{
+		RepoRoot: t.TempDir(), Target: "macos", Output: "/ignored/raw-sfx", AppOutput: want,
+	}, "darwin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if path != want {
+		t.Fatalf("effective artifact = %q, want %q", path, want)
+	}
+}
+
+func TestNormalizeDesktopBuildRequestReplacesHiddenMacOSRawOutput(t *testing.T) {
+	t.Parallel()
+	repository := t.TempDir()
+	request := BuildRequest{
+		RepoRoot: repository,
+		Target:   "auto",
+		Output:   "/retail-assets/hidden-invalid-output",
+	}
+	normalized := normalizeDesktopBuildRequest(request, "darwin")
+	want := filepath.Join(repository, "build", "sfx", "GeneralsXZH-macos-arm64-sfx")
+	if normalized.Output != want {
+		t.Fatalf("normalized macOS raw output = %q, want %q", normalized.Output, want)
+	}
+	if request.Output == normalized.Output {
+		t.Fatal("normalization mutated the caller's request")
+	}
+
+	linux := normalizeDesktopBuildRequest(request, "linux")
+	if linux.Output != request.Output {
+		t.Fatalf("Linux output = %q, want retained %q", linux.Output, request.Output)
 	}
 }
 

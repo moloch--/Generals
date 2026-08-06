@@ -23,15 +23,27 @@ Open it normally for a guided four-step build: choose the host-supported target,
 select or download your owned game files, configure the output, and review the
 plan before anything changes.
 
-After a real build succeeds, **Copy to Desktop** publishes a verified SFX
-without overwriting an existing file. An optional **Cleanup** action then shows
-the exact builder-owned paths it can remove and requires explicit confirmation.
-Cleanup is limited to files and directories that were absent before that build,
-such as an automatic source clone, managed caches, target build output, and
-packaging intermediates. Existing checkouts, existing caches, retail assets,
-global tools, and the verified Desktop copy are preserved. The app revalidates
-the Desktop SFX immediately before cleanup; a Linux SFX built on macOS is
-verified inside the existing Linux builder container.
+After a real build succeeds, **Copy to Desktop** publishes the verified primary
+personal game artifact without overwriting an existing item. For a macOS
+target, that artifact is the Finder-ready `GeneralsXZH.app`, complete with its
+Generals icon, and **Copy to Desktop** copies the entire app bundle. The raw
+launcher remains available at `GeneralsXZH.app/Contents/MacOS/GeneralsXZH` and
+as the separate SFX output for terminal and headless workflows. Linux and
+Windows keep their native SFX executables as the primary artifacts.
+
+An optional **Cleanup** action then shows the exact builder-owned paths it can
+remove and requires explicit confirmation. Cleanup is limited to files and
+directories that were absent before that build, such as an automatic source
+clone, managed caches, target build output, and packaging intermediates.
+Existing checkouts, existing caches, retail assets, global tools, and the
+verified Desktop copy are preserved. The app revalidates the Desktop artifact
+immediately before cleanup; a Linux SFX built on macOS is verified inside the
+existing Linux builder container.
+
+Automated Build Tool releases contain only the builder applications, headless
+companions, checksums, and licensing files. They never include or upload a
+user-generated game SFX or `GeneralsXZH.app`, both of which contain personal
+retail game data.
 
 If the selected game files need to be downloaded, the app opens SteamCMD in a
 real terminal. SteamCMD prompts there for the password and Steam Guard

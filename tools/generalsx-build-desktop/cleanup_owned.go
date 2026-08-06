@@ -516,38 +516,42 @@ func cleanupCloneReceipt(receipt *buildCleanupReceipt) *buildCleanupReceipt {
 
 func cleanupVerifyDesktopArtifact(ctx context.Context, jobID string, desktop *completedArtifact) (string, string, fs.FileInfo, error) {
 	if desktop == nil || desktop.jobID != jobID {
-		return "", "", nil, errors.New("the matching Desktop SFX copy is not verified")
+		return "", "", nil, errors.New("the matching Desktop build artifact is not verified")
 	}
 	if err := revalidateCompletedArtifact(ctx, desktop); err != nil {
-		return "", "", nil, fmt.Errorf("revalidate Desktop SFX copy: %w", err)
+		return "", "", nil, fmt.Errorf("revalidate Desktop build artifact: %w", err)
 	}
 	absolute, err := filepath.Abs(desktop.sourcePath)
 	if err != nil {
-		return "", "", nil, fmt.Errorf("resolve Desktop SFX copy: %w", err)
+		return "", "", nil, fmt.Errorf("resolve Desktop build artifact: %w", err)
 	}
 	absolute = filepath.Clean(absolute)
 	current, err := os.Lstat(absolute)
 	if err != nil {
-		return "", "", nil, fmt.Errorf("inspect Desktop SFX copy: %w", err)
+		return "", "", nil, fmt.Errorf("inspect Desktop build artifact: %w", err)
 	}
-	if err := validateSourceArtifact(current); err != nil {
-		return "", "", nil, fmt.Errorf("validate Desktop SFX copy: %w", err)
+	if desktop.sourceInfo.IsDir() {
+		if err := validateBundleArtifactRoot(absolute, current); err != nil {
+			return "", "", nil, fmt.Errorf("validate Desktop application bundle: %w", err)
+		}
+	} else if err := validateSourceArtifact(current); err != nil {
+		return "", "", nil, fmt.Errorf("validate Desktop build artifact: %w", err)
 	}
 	if !artifactInfoMatches(desktop.sourceInfo, current) {
-		return "", "", nil, errors.New("Desktop SFX copy changed after it was verified")
+		return "", "", nil, errors.New("Desktop build artifact changed after it was verified")
 	}
 	opened, err := os.Open(absolute)
 	if err != nil {
-		return "", "", nil, fmt.Errorf("open Desktop SFX copy: %w", err)
+		return "", "", nil, fmt.Errorf("open Desktop build artifact: %w", err)
 	}
 	defer opened.Close()
 	openedInfo, err := opened.Stat()
 	if err != nil || !artifactInfoMatches(desktop.sourceInfo, openedInfo) {
-		return "", "", nil, errors.New("Desktop SFX copy changed before cleanup")
+		return "", "", nil, errors.New("Desktop build artifact changed before cleanup")
 	}
 	resolved, err := filepath.EvalSymlinks(absolute)
 	if err != nil {
-		return "", "", nil, fmt.Errorf("resolve Desktop SFX copy: %w", err)
+		return "", "", nil, fmt.Errorf("resolve Desktop build artifact: %w", err)
 	}
 	return absolute, filepath.Clean(resolved), openedInfo, nil
 }
@@ -844,7 +848,7 @@ func executeBuildCleanup(ctx context.Context, receipt *buildCleanupReceipt) (str
 		return "", err
 	}
 	desktop := &completedArtifact{
-		jobID: receipt.jobID, sourcePath: receipt.desktopPath, sourceInfo: receipt.desktopInfo,
+		jobID: receipt.jobID, target: receipt.target, sourcePath: receipt.desktopPath, sourceInfo: receipt.desktopInfo,
 		sourceSHA256: receipt.desktopSHA256,
 	}
 	_, desktopResolved, desktopInfo, err := cleanupVerifyDesktopArtifact(ctx, receipt.jobID, desktop)

@@ -41,8 +41,8 @@ type LogEvent struct {
 type buildMainFunc func(context.Context, []string, io.Reader, io.Writer, io.Writer, buildcli.RunOptions) int
 type emitEventFunc func(context.Context, string, interface{})
 type chooseDirectoryFunc func(context.Context, wailsruntime.OpenDialogOptions) (string, error)
-type copyArtifactFunc func(context.Context, *completedArtifact, string) (string, error)
 type verifyArtifactFunc func(context.Context, string, string) error
+type copyArtifactFunc func(context.Context, *completedArtifact, string, verifyArtifactFunc) (string, error)
 type cleanupBuildFunc func(context.Context, *buildCleanupReceipt) (string, error)
 
 type appDependencies struct {
@@ -67,6 +67,7 @@ type appDependencies struct {
 type activeBuild struct {
 	id              string
 	phase           string
+	target          string
 	artifactPath    string
 	dryRun          bool
 	cleanupSnapshot *buildCleanupSnapshot
@@ -186,15 +187,19 @@ func (a *App) ChooseDirectory(kind, current string) (string, error) {
 
 // GeneralsX @build Codex 05/08/2026 Run the existing builder with cancellable context and structured desktop events.
 func (a *App) StartBuild(request BuildRequest) (string, error) {
+	request = normalizeDesktopBuildRequest(request, a.dependencies.hostOS)
 	if err := validationError(a.ValidateBuild(request)); err != nil {
+		return "", err
+	}
+	resolvedTarget, err := resolveTarget(request.Target, a.dependencies.hostOS)
+	if err != nil {
 		return "", err
 	}
 	artifactPath := ""
 	if !request.DryRun {
-		var err error
 		artifactPath, err = effectiveArtifactPath(request, a.dependencies.hostOS)
 		if err != nil {
-			return "", fmt.Errorf("resolve SFX output path: %w", err)
+			return "", fmt.Errorf("resolve build artifact path: %w", err)
 		}
 	}
 	cleanupSnapshot := snapshotBuildCleanup(request, a.dependencies.hostOS)
@@ -227,7 +232,7 @@ func (a *App) StartBuild(request BuildRequest) (string, error) {
 	jobID := a.dependencies.newJobID()
 	buildContext, cancel := context.WithCancel(a.ctx)
 	job := &activeBuild{
-		id: jobID, phase: "preflight", artifactPath: artifactPath, dryRun: request.DryRun,
+		id: jobID, phase: "preflight", target: resolvedTarget, artifactPath: artifactPath, dryRun: request.DryRun,
 		cleanupSnapshot: cleanupSnapshot, cancel: cancel, done: make(chan struct{}),
 	}
 	previousCleanupReceipt := a.cleanupReceipt
@@ -283,7 +288,14 @@ func (a *App) runBuild(ctx context.Context, job *activeBuild, arguments []string
 		completed, err := inspectCompletedArtifactContext(ctx, job.id, job.artifactPath)
 		if err != nil {
 			artifactErr = err
+		} else if a.dependencies.verifyArtifact == nil {
+			artifactErr = errors.New("build artifact verification is unavailable")
+		} else if err := a.dependencies.verifyArtifact(ctx, job.artifactPath, job.target); err != nil {
+			artifactErr = err
+		} else if err := revalidateCompletedArtifact(ctx, completed); err != nil {
+			artifactErr = fmt.Errorf("artifact changed during verification: %w", err)
 		} else {
+			completed.target = job.target
 			completedArtifact = completed
 			cleanupReceipt = finalizeBuildCleanup(job.id, job.cleanupSnapshot)
 		}
@@ -308,7 +320,7 @@ func (a *App) runBuild(ctx context.Context, job *activeBuild, arguments []string
 		progress.Message = "Build cancelled"
 	} else if artifactErr != nil {
 		progress.Status = "error"
-		progress.Message = fmt.Sprintf("Build completed but the SFX artifact could not be verified: %v", artifactErr)
+		progress.Message = fmt.Sprintf("Build completed but the artifact could not be verified: %v", artifactErr)
 		progress.ExitCode = 1
 	} else if exitCode == 0 {
 		progress.Status = "success"
@@ -342,6 +354,14 @@ func interactiveHandoffProgress(purpose buildcli.InteractivePurpose) (string, st
 
 func (a *App) reportBuilderProgress(ctx context.Context, job *activeBuild, event buildcli.ProgressEvent) {
 	phase := string(event.Phase)
+	message := event.Message
+	if event.Phase == buildcli.ProgressPhaseComplete {
+		phase = "verify"
+		message = "Verifying the completed build artifact"
+		if job.dryRun {
+			message = "Finalizing the dry-run plan"
+		}
+	}
 	a.mu.Lock()
 	if a.active == job {
 		job.phase = phase
@@ -349,7 +369,7 @@ func (a *App) reportBuilderProgress(ctx context.Context, job *activeBuild, event
 	a.mu.Unlock()
 	a.emitJobProgress(ctx, job, ProgressEvent{
 		JobID: job.id, Phase: phase, Status: "running",
-		Message: event.Message, Percent: phasePercent(phase), ExitCode: -1,
+		Message: message, Percent: phasePercent(phase), ExitCode: -1,
 	})
 }
 
@@ -367,6 +387,8 @@ func phasePercent(phase string) int {
 		return 65
 	case "build":
 		return 75
+	case "verify":
+		return 95
 	case "complete":
 		return 100
 	default:

@@ -14,6 +14,13 @@ Retina `.icns` icon. A small, separately signed AppKit helper presents
 first-launch extraction progress while the Go SFX remains the only game
 launcher and source of cache state.
 
+The GUI Automated Build Tool treats `GeneralsXZH.app` as the primary personal
+macOS game artifact and copies the complete bundle to the Desktop. The same raw
+SFX remains available as the separate build output and at
+`GeneralsXZH.app/Contents/MacOS/GeneralsXZH` for direct terminal and headless
+workflows. Neither generated artifact is a project release asset: both contain
+the user's retail game data and must remain private.
+
 An SFX is native to one operating system and CPU architecture. It is not an
 emulator or a universal binary:
 
@@ -27,6 +34,24 @@ emulator or a universal binary:
 The launcher OS/architecture is host-native; Windows can launch the embedded
 PE32 child normally. The launcher rejects a payload on a different declared
 host OS or architecture.
+
+### Platform icon behavior
+
+- The macOS SFX build produces `GeneralsXZH.app` with the GeneralsXZH Retina
+  `.icns`; the raw Mach-O remains available for terminal use and has no
+  portable Finder icon metadata of its own.
+- Windows SFX launchers embed the six-size GeneralsXZH icon directly in both
+  AMD64 and 386 PE resources. Explorer and the native extraction-progress
+  window use that same resource while the executable remains a console
+  application.
+- Linux desktop environments do not define an embedded file-icon resource for
+  raw ELF executables. The Linux SFX therefore stays one native executable;
+  an AppImage, Flatpak, or installed `.desktop` entry must pair it with
+  `assets/generalsx-zh_icon.png` when graphical shell branding is required.
+
+Do not add a custom ELF section or filesystem extended attribute as an icon:
+GNOME and KDE do not share a portable contract for either approach, and the
+metadata would not reliably survive copying the SFX to another computer.
 
 > **Validation status (2026-07-31):** the retail-sized macOS/ARM64 artifact
 > passed strict ad-hoc signature and full extraction verification, then reached

@@ -17,15 +17,22 @@ present the same guided flow:
 
 The app validates each step before it starts and shows the shared builder's
 real phase, terminal output, cancellation state, and final artifact path. It
-does not contain game data.
+does not contain game data. Tagged releases distribute only the Automated Build
+Tool, its headless companion, checksums, and licensing files; they never attach
+a user-generated game SFX or macOS game app.
 
-After a real build completes, select **Copy to Desktop** to publish the raw SFX
-through a temporary sibling without overwriting an existing Desktop file. Once
-that copy succeeds, **Cleanup** becomes available. Cleanup first presents every
-path authorized for deletion in a destructive confirmation dialog. The
-confirmation is bound to that exact one-time plan; reviewing a new plan,
-starting another build, or changing the copied SFX invalidates stale
-authorization.
+After a real build completes, select **Copy to Desktop** to publish the primary
+personal game artifact through a temporary sibling without overwriting an
+existing Desktop item. For a macOS target, that artifact is the complete
+Finder-ready `GeneralsXZH.app` bundle with its Generals icon. Linux and Windows
+copy their native SFX executables. The private sibling is fully hashed and runs
+the platform verifier before its atomic no-replace publication; a failed check
+therefore leaves no partial or unrecorded Desktop artifact. Once that copy
+succeeds, **Cleanup** becomes available. Cleanup first presents every path
+authorized for deletion in a
+destructive confirmation dialog. The confirmation is bound to that exact
+one-time plan; reviewing a new plan, starting another build, or changing the
+copied artifact invalidates stale authorization.
 
 Cleanup claims only destinations that did not exist when that specific build
 started and that still carry the same build's private ownership receipt. This
@@ -35,18 +42,20 @@ output and macOS app bundle, stage manifests, portable bundle intermediates,
 and build logs. Descendants collapse under an owned parent so the dialog stays
 readable. Existing repositories, existing cache roots and their pre-existing
 contents, explicit or adjacent server sources, retail assets, installed SDKs
-and package-manager state, Docker images, and the Desktop SFX are never inferred
-as disposable.
+and package-manager state, Docker images, and the Desktop artifact are never
+inferred as disposable.
 
-Immediately before deletion, the app hashes and reopens the Desktop copy, runs
-the SFX's full `--sfx-verify`, then hashes it again. A Linux/AMD64 SFX produced
-on macOS is verified in the already-required Linux builder container with no
-network and a read-only container filesystem. Every cleanup candidate is
-content-fingerprinted again, moved to a same-parent quarantine name through a
-root-scoped filesystem handle, and removed only if its identity, ownership
-marker, contents, and protected-path boundaries remain unchanged. Cancellation
-stops between owned roots, and any untouched roots remain eligible for a newly
-reviewed retry.
+Immediately before deletion, the app revalidates the complete Desktop artifact
+and runs the SFX's full `--sfx-verify`. For macOS, it verifies the app bundle and
+invokes its nested `Contents/MacOS/GeneralsXZH` launcher; the separately emitted
+raw SFX remains available for direct terminal and headless workflows. A
+Linux/AMD64 SFX produced on macOS is verified in the already-required Linux
+builder container with no network and a read-only container filesystem. Every
+cleanup candidate is content-fingerprinted again, moved to a same-parent
+quarantine name through a root-scoped filesystem handle, and removed only if
+its identity, ownership marker, contents, and protected-path boundaries remain
+unchanged. Cancellation stops between owned roots, and any untouched roots
+remain eligible for a newly reviewed retry.
 
 When SteamCMD needs to download files, the desktop app opens it in a real native
 terminal and waits for it to finish. Enter the Steam password and Steam Guard
@@ -198,9 +207,9 @@ not generated substitutes.
 
 ## Platform behavior
 
-| Target | Supported build host | Native game | Default SFX output | Status |
+| Target | Supported build host | Native game | Default personal artifact | Status |
 |---|---|---|---|---|
-| macOS | Apple Silicon macOS | ARM64, `macos-vulkan` | `build/sfx/GeneralsXZH-macos-arm64-sfx` plus `GeneralsXZH.app` | Primary |
+| macOS | Apple Silicon macOS | ARM64, `macos-vulkan` | `build/sfx/GeneralsXZH.app` (primary) plus `GeneralsXZH-macos-arm64-sfx` | Primary |
 | Linux | Linux/AMD64, or macOS with Docker | AMD64, `linux64-deploy` | `build/sfx/GeneralsXZH-linux-amd64-sfx` | Active |
 | Windows | Windows/AMD64 | x86, `win32-vcpkg`, inside an AMD64 SFX | `build\sfx\GeneralsXZH-windows-amd64-sfx.exe` | Exploratory |
 
@@ -225,7 +234,11 @@ go run ./cmd/generalsx-build \
   --accept-sdk-licenses
 ```
 
-The raw SFX and Finder-launchable `.app` are both produced.
+The Finder-launchable `GeneralsXZH.app` is the Automated Build Tool's primary
+macOS personal game artifact, and **Copy to Desktop** publishes that complete
+bundle with its Generals icon intact. The raw SFX is still produced separately
+and nested at `GeneralsXZH.app/Contents/MacOS/GeneralsXZH` for direct terminal
+and headless compatibility.
 The game binary declares macOS 15, but Homebrew/Vulkan dylibs can raise the
 finished artifact's effective minimum to the builder's OS; the packager does
 not claim older-host compatibility without a complete dylib deployment-target

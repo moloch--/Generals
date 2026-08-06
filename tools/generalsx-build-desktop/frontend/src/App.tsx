@@ -12,6 +12,7 @@ import {
   applyDirectorySelection,
   emptyBuildRequest,
   normalizeBuildRequest,
+  primaryArtifactPath,
   validateWizardStep,
 } from "./lib/request";
 import {GameFilesStep} from "./steps/GameFilesStep";
@@ -149,7 +150,7 @@ export function App() {
     }
 
     for (let step = currentStep; step < nextStep; step += 1) {
-      const stepIssues = validateWizardStep(step, request, legalAcknowledged);
+      const stepIssues = validateWizardStep(step, request, legalAcknowledged, hostOS);
       if (stepIssues.length > 0) {
         setIssues(stepIssues);
         setCurrentStep(step);
@@ -158,7 +159,7 @@ export function App() {
     }
     setIssues([]);
     setCurrentStep(nextStep);
-  }, [currentStep, execution, legalAcknowledged, request]);
+  }, [currentStep, execution, hostOS, legalAcknowledged, request]);
 
   const startBuild = useCallback(async () => {
     const normalized = normalizeBuildRequest(request);
@@ -260,6 +261,7 @@ export function App() {
             {currentStep === 3 ? (
               finalStepPane === "review" ? (
                 <ReviewStep
+                  hostOS={hostOS}
                   issues={issues}
                   legalAcknowledged={legalAcknowledged}
                   request={request}
@@ -270,10 +272,10 @@ export function App() {
                 />
               ) : (
                 <BuildStatus
+                  artifactPath={primaryArtifactPath(request, hostOS)}
                   dryRun={request.dryRun}
                   error={executionError}
                   logs={logs}
-                  output={request.output}
                   progress={progress}
                   state={execution}
                   onCancel={() => void cancelBuild()}

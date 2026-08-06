@@ -3,10 +3,11 @@ import {Card} from "@heroui/react/card";
 import {Chip} from "@heroui/react/chip";
 
 import {SwitchSetting} from "../components/SwitchSetting";
-import {targetLabel} from "../lib/request";
+import {isMacOSBuild, primaryArtifactPath, targetLabel} from "../lib/request";
 import type {BuildRequest, ValidationIssue} from "../types";
 
 interface ReviewStepProps {
+  hostOS: string;
   request: BuildRequest;
   legalAcknowledged: boolean;
   issues: ValidationIssue[];
@@ -30,6 +31,7 @@ function enabledOptions(request: BuildRequest): string[] {
 }
 
 export function ReviewStep({
+  hostOS,
   request,
   legalAcknowledged,
   issues,
@@ -37,6 +39,7 @@ export function ReviewStep({
 }: ReviewStepProps) {
   const errors = issues.filter((issue) => issue.severity !== "warning");
   const warnings = issues.filter((issue) => issue.severity === "warning");
+  const buildsMacOSApplication = isMacOSBuild(request.target, hostOS);
 
   return (
     <div className="space-y-6">
@@ -60,8 +63,10 @@ export function ReviewStep({
               <dd className="mt-1 break-all text-sm">{request.assetsDir}</dd>
             </div>
             <div>
-              <dt className="text-xs font-medium text-muted">SFX output</dt>
-              <dd className="mt-1 break-all text-sm">{request.output}</dd>
+              <dt className="text-xs font-medium text-muted">
+                {buildsMacOSApplication ? "macOS application output" : "SFX output"}
+              </dt>
+              <dd className="mt-1 break-all text-sm">{primaryArtifactPath(request, hostOS)}</dd>
             </div>
           </dl>
 

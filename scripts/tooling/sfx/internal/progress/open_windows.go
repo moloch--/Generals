@@ -25,6 +25,7 @@ const (
 
 	colorWindow       = 5
 	defaultGUIFont    = 17
+	generalsXIcon     = 1
 	idcArrow          = 32512
 	idiApplication    = 32512
 	pmRemove          = 0x0001
@@ -234,7 +235,7 @@ func createWindowsProgressWindow() *windowsProgressWindow {
 	}
 	className := utf16Pointer("GeneralsXSFXProgressWindow")
 	cursor, _, _ := loadCursorW.Call(0, idcArrow)
-	icon, _, _ := loadIconW.Call(0, idiApplication)
+	icon := loadWindowsProgressIcon(instance)
 	class := windowsClass{
 		size:       uint32(unsafe.Sizeof(windowsClass{})),
 		windowProc: windowsProgressCallback,
@@ -310,6 +311,15 @@ func createWindowsProgressWindow() *windowsProgressWindow {
 	showWindow.Call(window, swShowNormal)
 	updateWindow.Call(window)
 	return &windowsProgressWindow{window: window, label: label, bar: bar}
+}
+
+func loadWindowsProgressIcon(instance uintptr) uintptr {
+	// GeneralsX @feature Codex 05/08/2026 Use the branded PE resource for both the SFX file and progress window.
+	icon, _, _ := loadIconW.Call(instance, generalsXIcon)
+	if icon == 0 {
+		icon, _, _ = loadIconW.Call(0, idiApplication)
+	}
+	return icon
 }
 
 func (window *windowsProgressWindow) apply(update event) {

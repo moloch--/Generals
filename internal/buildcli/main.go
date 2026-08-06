@@ -120,18 +120,22 @@ func (app application) run(ctx context.Context) error {
 			return err
 		}
 	}
-	reportProgress(app.reporter, ProgressPhaseBuild, "Building the self-extracting game executable")
+	buildMessage := "Building the self-extracting game executable"
+	if app.cfg.target == targetMacOS {
+		buildMessage = "Building the Finder-ready game application"
+	}
+	reportProgress(app.reporter, ProgressPhaseBuild, buildMessage)
 	if err := app.buildSFX(ctx, buildEnv, serverBinary); err != nil {
 		return err
 	}
 	fmt.Fprintln(app.runner.stdout)
 	if app.cfg.dryRun {
-		fmt.Fprintf(app.runner.stdout, "Dry run complete; planned output: %s\n", app.cfg.output)
+		fmt.Fprintf(app.runner.stdout, "Dry run complete; planned output: %s\n", app.cfg.primaryArtifactPath())
 	} else {
-		fmt.Fprintf(app.runner.stdout, "Build complete: %s\n", app.cfg.output)
+		fmt.Fprintf(app.runner.stdout, "Build complete: %s\n", app.cfg.primaryArtifactPath())
 	}
 	if app.cfg.target == targetMacOS {
-		fmt.Fprintf(app.runner.stdout, "macOS app: %s\n", app.cfg.appOutput)
+		fmt.Fprintf(app.runner.stdout, "Terminal launcher: %s\n", filepath.Join(app.cfg.appOutput, "Contents", "MacOS", "GeneralsXZH"))
 	}
 	if app.cfg.withOnlineServer {
 		fmt.Fprintln(app.runner.stdout, "Bundled backend: launch with --sfx-server; it is never started or exposed automatically.")

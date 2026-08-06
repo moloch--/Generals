@@ -1,4 +1,4 @@
-import {emptyBuildRequest, validateAllSteps} from "./request";
+import {emptyBuildRequest, isMacOSBuild, primaryArtifactPath, validateAllSteps} from "./request";
 import {selectDesktopBackendMode} from "./backendMode";
 import type {
   BuildCleanupPlan,
@@ -86,7 +86,7 @@ function detectHost(): Pick<DesktopDefaults, "hostOS" | "hostArch"> {
 }
 
 function previewDesktopCopyPath(artifactPath: string): string {
-  const fileName = artifactPath.split(/[\\/]/).pop() || "GeneralsXZH-sfx";
+  const fileName = artifactPath.split(/[\\/]/).pop() || "GeneralsXZH-build";
   const host = detectHost();
   if (host.hostOS === "windows") {
     return `C:\\Users\\Commander\\Desktop\\${fileName}`;
@@ -148,6 +148,7 @@ function clearMockTimers(): void {
 }
 
 function scheduleMockBuild(jobId: string, request: BuildRequest): void {
+  const buildsMacOSApplication = isMacOSBuild(request.target, detectHost().hostOS);
   const buildPhases: Array<Omit<BuildProgressEvent, "jobId"> & {log: string}> = [
     {
       phase: "prepare",
@@ -195,14 +196,20 @@ function scheduleMockBuild(jobId: string, request: BuildRequest): void {
     {
       phase: "package",
       status: "running",
-      message: "Packaging the self-extracting artifact",
+      message: buildsMacOSApplication
+        ? "Packaging the branded macOS application"
+        : "Packaging the self-extracting artifact",
       percent: 92,
-      log: "Private retail payload staged for local packaging.",
+      log: buildsMacOSApplication
+        ? "Private retail payload packaged inside GeneralsXZH.app."
+        : "Private retail payload staged for local packaging.",
     },
     {
       phase: "verify",
       status: "success",
-      message: "Build and artifact verification complete",
+      message: buildsMacOSApplication
+        ? "Build and macOS application verification complete"
+        : "Build and artifact verification complete",
       percent: 100,
       exitCode: 0,
       log: "Artifact checks passed. Preview build complete.",
@@ -273,7 +280,7 @@ export const desktopBackend = {
   },
 
   async validateBuild(request: BuildRequest, legalAcknowledged: boolean): Promise<ValidationIssue[]> {
-    const localIssues = validateAllSteps(request, legalAcknowledged);
+    const localIssues = validateAllSteps(request, legalAcknowledged, detectHost().hostOS);
     if (localIssues.length > 0) {
       return localIssues;
     }
@@ -290,7 +297,8 @@ export const desktopBackend = {
     clearMockTimers();
     mockPercent = 0;
     mockJobId = `preview-${Date.now()}`;
-    mockArtifactPath = request.output;
+    // GeneralsX @feature Codex 05/08/2026 Preview the same primary artifact users receive from a native build.
+    mockArtifactPath = primaryArtifactPath(request, detectHost().hostOS);
     mockDryRun = request.dryRun;
     mockArtifactVerified = false;
     mockDesktopCopyPath = "";
@@ -316,7 +324,7 @@ export const desktopBackend = {
       mockCleanupCompleted ||
       mockCleanupInProgress
     ) {
-      throw new Error("No verified SFX artifact is available for this preview build.");
+      throw new Error("No verified build artifact is available for this preview build.");
     }
     await new Promise((resolve) => window.setTimeout(resolve, 400));
     mockDesktopCopyPath = previewDesktopCopyPath(mockArtifactPath);
@@ -338,7 +346,7 @@ export const desktopBackend = {
       mockCleanupCompleted ||
       mockCleanupInProgress
     ) {
-      throw new Error("No copied SFX artifact is available for cleanup in this preview build.");
+      throw new Error("No copied build artifact is available for cleanup in this preview build.");
     }
     await new Promise((resolve) => window.setTimeout(resolve, 300));
     if (
@@ -348,14 +356,14 @@ export const desktopBackend = {
       mockCleanupCompleted ||
       mockCleanupInProgress
     ) {
-      throw new Error("No copied SFX artifact is available for cleanup in this preview build.");
+      throw new Error("No copied build artifact is available for cleanup in this preview build.");
     }
     mockCleanupPlanId = `${jobId}-cleanup-${++mockCleanupPlanSequence}`;
     return {
       jobId,
       planId: mockCleanupPlanId,
       desktopCopyPath: mockDesktopCopyPath,
-      entries: [{label: "Generated SFX artifact", path: mockArtifactPath}],
+      entries: [{label: "Generated build artifact", path: mockArtifactPath}],
     };
   },
 
@@ -377,7 +385,7 @@ export const desktopBackend = {
       mockCleanupCompleted ||
       mockCleanupInProgress
     ) {
-      throw new Error("No copied SFX artifact is available for cleanup in this preview build.");
+      throw new Error("No copied build artifact is available for cleanup in this preview build.");
     }
     mockCleanupInProgress = true;
     mockCleanupPlanId = "";
@@ -385,7 +393,7 @@ export const desktopBackend = {
       await new Promise((resolve) => window.setTimeout(resolve, 500));
       mockCleanupCompleted = true;
       mockArtifactVerified = false;
-      return "Removed the generated SFX artifact from the preview build workspace.";
+      return "Removed the generated build artifact from the preview build workspace.";
     } finally {
       mockCleanupInProgress = false;
     }

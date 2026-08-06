@@ -1,6 +1,8 @@
 // GeneralsX @feature moloch 30/07/2026 Run an embedded native game from a verified extraction cache.
 package main
 
+//go:generate ../../generate-windows-icon-resources.sh
+
 import (
 	"context"
 	"crypto/sha256"
