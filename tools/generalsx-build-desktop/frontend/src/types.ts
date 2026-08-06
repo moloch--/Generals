@@ -65,6 +65,19 @@ export interface BuildLogEvent {
   text: string;
 }
 
+// GeneralsX @feature Codex 05/08/2026 Describe the exact completed-build paths authorized for cleanup.
+export interface BuildCleanupEntry {
+  label: string;
+  path: string;
+}
+
+export interface BuildCleanupPlan {
+  jobId: string;
+  planId: string;
+  desktopCopyPath: string;
+  entries: BuildCleanupEntry[];
+}
+
 export type ExecutionState =
   | "idle"
   | "validating"

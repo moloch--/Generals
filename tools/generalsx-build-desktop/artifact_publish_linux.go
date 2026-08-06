@@ -1,0 +1,16 @@
+//go:build linux
+
+package main
+
+import "golang.org/x/sys/unix"
+
+// GeneralsX @feature Codex 05/08/2026 Publish a complete Linux Desktop copy without replacing an existing file.
+func publishTemporaryArtifact(temporaryPath, destinationPath string) error {
+	return unix.Renameat2(
+		unix.AT_FDCWD,
+		temporaryPath,
+		unix.AT_FDCWD,
+		destinationPath,
+		unix.RENAME_NOREPLACE,
+	)
+}

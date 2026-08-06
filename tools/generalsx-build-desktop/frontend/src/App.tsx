@@ -7,6 +7,7 @@ import {AppHeader} from "./components/AppHeader";
 import {BuildStatus} from "./components/BuildStatus";
 import {WizardNavigation} from "./components/WizardNavigation";
 import {desktopBackend} from "./lib/backend";
+import {selectFinalStepPane} from "./lib/execution";
 import {
   applyDirectorySelection,
   emptyBuildRequest,
@@ -212,6 +213,8 @@ export function App() {
   }, []);
 
   const primaryLabel = request.dryRun ? "Run dry plan" : "Start build";
+  // GeneralsX @bugfix Codex 05/08/2026 Replace the final review with build activity throughout execution.
+  const finalStepPane = selectFinalStepPane(execution);
 
   return (
     <div className="min-h-screen bg-background text-foreground">
@@ -255,15 +258,31 @@ export function App() {
               <OptionsStep request={request} onBrowse={(kind) => void browse(kind)} onUpdate={updateRequest} />
             ) : null}
             {currentStep === 3 ? (
-              <ReviewStep
-                issues={issues}
-                legalAcknowledged={legalAcknowledged}
-                request={request}
-                onLegalAcknowledgedChange={(acknowledged) => {
-                  setLegalAcknowledged(acknowledged);
-                  setIssues((previous) => previous.filter((issue) => issue.field !== "legalAcknowledged"));
-                }}
-              />
+              finalStepPane === "review" ? (
+                <ReviewStep
+                  issues={issues}
+                  legalAcknowledged={legalAcknowledged}
+                  request={request}
+                  onLegalAcknowledgedChange={(acknowledged) => {
+                    setLegalAcknowledged(acknowledged);
+                    setIssues((previous) => previous.filter((issue) => issue.field !== "legalAcknowledged"));
+                  }}
+                />
+              ) : (
+                <BuildStatus
+                  dryRun={request.dryRun}
+                  error={executionError}
+                  logs={logs}
+                  output={request.output}
+                  progress={progress}
+                  state={execution}
+                  onCancel={() => void cancelBuild()}
+                  onCleanup={(planId) => desktopBackend.cleanupBuild(activeJobRef.current, planId)}
+                  onCopyToDesktop={() => desktopBackend.copyBuildArtifactToDesktop(activeJobRef.current)}
+                  onGetCleanupPlan={() => desktopBackend.getBuildCleanupPlan(activeJobRef.current)}
+                  onReset={resetExecution}
+                />
+              )
             ) : null}
 
             {currentStep !== 3 && issues.length > 0 ? (
@@ -274,19 +293,6 @@ export function App() {
                   <Alert.Description>{issues[0]?.message}</Alert.Description>
                 </Alert.Content>
               </Alert>
-            ) : null}
-
-            {currentStep === 3 ? (
-              <BuildStatus
-                dryRun={request.dryRun}
-                error={executionError}
-                logs={logs}
-                output={request.output}
-                progress={progress}
-                state={execution}
-                onCancel={() => void cancelBuild()}
-                onReset={resetExecution}
-              />
             ) : null}
 
             {execution === "idle" ? (

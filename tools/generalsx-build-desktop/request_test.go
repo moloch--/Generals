@@ -1,12 +1,39 @@
 package main
 
 import (
+	"path/filepath"
 	"reflect"
 	"slices"
 	"testing"
 
 	"github.com/moloch--/Generals/internal/buildcli"
 )
+
+func TestEffectiveArtifactPathMatchesCLIBlankOutputDefaults(t *testing.T) {
+	t.Parallel()
+	repository := t.TempDir()
+	for _, test := range []struct {
+		name   string
+		hostOS string
+		target string
+		file   string
+	}{
+		{name: "automatic macOS", hostOS: "darwin", target: "auto", file: "GeneralsXZH-macos-arm64-sfx"},
+		{name: "explicit Linux on macOS", hostOS: "darwin", target: "linux", file: "GeneralsXZH-linux-amd64-sfx"},
+		{name: "automatic Windows", hostOS: "windows", target: "auto", file: "GeneralsXZH-windows-amd64-sfx.exe"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			path, err := effectiveArtifactPath(BuildRequest{RepoRoot: repository, Target: test.target}, test.hostOS)
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := filepath.Join(repository, "build", "sfx", test.file)
+			if path != want {
+				t.Fatalf("effective artifact = %q, want %q", path, want)
+			}
+		})
+	}
+}
 
 func TestGetDefaultsMapsSharedBuilderDefaults(t *testing.T) {
 	t.Parallel()

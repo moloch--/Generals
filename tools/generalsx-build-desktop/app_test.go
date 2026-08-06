@@ -2,8 +2,12 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -84,6 +88,7 @@ func testApp(t *testing.T, recorder *eventRecorder) (*App, BuildRequest, *appDep
 	}
 	request := defaults.Request
 	request.SkipAssets = true
+	request.Output = filepath.Join(t.TempDir(), "GeneralsXZH-sfx")
 	return app, request, &dependencies
 }
 
@@ -98,6 +103,10 @@ func TestStartBuildStreamsStructuredProgressAndLogs(t *testing.T) {
 		fmt.Fprintln(stdout, "source output")
 		fmt.Fprintln(stderr, "source warning")
 		options.Reporter.Report(buildcli.ProgressEvent{Phase: buildcli.ProgressPhaseComplete, Message: "Complete"})
+		if err := os.WriteFile(request.Output, []byte("verified SFX"), 0o700); err != nil {
+			t.Errorf("write source artifact: %v", err)
+			return 1
+		}
 		return 0
 	}
 	app.dependencies = *dependencies
@@ -269,6 +278,10 @@ func TestStartBuildHandsSteamCommandToNativeTerminalRunner(t *testing.T) {
 		if err != nil {
 			return 1
 		}
+		if err := os.WriteFile(request.Output, []byte("verified SFX"), 0o700); err != nil {
+			t.Errorf("write source artifact: %v", err)
+			return 1
+		}
 		return 0
 	}
 	app.dependencies = *dependencies
@@ -312,6 +325,200 @@ func TestChooseDirectoryUsesFieldKindsAndOutputDirectorySemantics(t *testing.T) 
 	}
 }
 
+func TestCopyBuildArtifactToDesktopCopiesOnlyTheMatchingSuccessfulBuild(t *testing.T) {
+	t.Parallel()
+	recorder := newEventRecorder()
+	app, request, dependencies := testApp(t, recorder)
+	desktop := t.TempDir()
+	sourceDirectory := t.TempDir()
+	request.Output = filepath.Join(sourceDirectory, "GeneralsXZH-sfx")
+	payload := []byte("verified SFX fixture")
+	dependencies.desktopDirectory = func() (string, error) { return desktop, nil }
+	dependencies.builder = func(_ context.Context, _ []string, _ io.Reader, _, _ io.Writer, _ buildcli.RunOptions) int {
+		if err := os.WriteFile(request.Output, payload, 0o751); err != nil {
+			t.Errorf("write source artifact: %v", err)
+			return 1
+		}
+		return 0
+	}
+	app.dependencies = *dependencies
+
+	if _, err := app.CopyBuildArtifactToDesktop("job-fixture"); err == nil {
+		t.Fatal("copy before a successful build was accepted")
+	}
+	jobID, err := app.StartBuild(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	recorder.waitForProgress(t, "success")
+	if _, err := app.CopyBuildArtifactToDesktop("another-job"); err == nil {
+		t.Fatal("copy with the wrong job ID was accepted")
+	}
+	existing := filepath.Join(desktop, filepath.Base(request.Output))
+	if err := os.WriteFile(existing, []byte("keep existing"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	destination, err := app.CopyBuildArtifactToDesktop(jobID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := filepath.Join(desktop, "GeneralsXZH-sfx (1)"); destination != want {
+		t.Fatalf("destination = %q, want %q", destination, want)
+	}
+	contents, err := os.ReadFile(destination)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(contents) != string(payload) {
+		t.Fatalf("copied contents = %q", contents)
+	}
+	kept, err := os.ReadFile(existing)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(kept) != "keep existing" {
+		t.Fatalf("existing Desktop artifact was overwritten: %q", kept)
+	}
+	if runtime.GOOS != "windows" {
+		info, statErr := os.Stat(destination)
+		if statErr != nil {
+			t.Fatal(statErr)
+		}
+		if got, want := info.Mode().Perm(), os.FileMode(0o751); got != want {
+			t.Fatalf("destination permissions = %o, want %o", got, want)
+		}
+	}
+}
+
+func TestCopyBuildArtifactToDesktopRejectsDryRunAndFailure(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		name     string
+		dryRun   bool
+		exitCode int
+		status   string
+	}{
+		{name: "dry run", dryRun: true, exitCode: 0, status: "success"},
+		{name: "failed build", exitCode: 1, status: "error"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			recorder := newEventRecorder()
+			app, request, dependencies := testApp(t, recorder)
+			request.DryRun = test.dryRun
+			request.Output = filepath.Join(t.TempDir(), "GeneralsXZH-sfx")
+			dependencies.desktopDirectory = func() (string, error) { return t.TempDir(), nil }
+			dependencies.builder = func(_ context.Context, _ []string, _ io.Reader, _, _ io.Writer, _ buildcli.RunOptions) int {
+				return test.exitCode
+			}
+			app.dependencies = *dependencies
+
+			jobID, err := app.StartBuild(request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			recorder.waitForProgress(t, test.status)
+			if _, err := app.CopyBuildArtifactToDesktop(jobID); err == nil {
+				t.Fatalf("copy after %s was accepted", test.name)
+			}
+		})
+	}
+}
+
+func TestSuccessfulBuilderWithoutArtifactReportsFailure(t *testing.T) {
+	t.Parallel()
+	recorder := newEventRecorder()
+	app, request, dependencies := testApp(t, recorder)
+	dependencies.builder = func(_ context.Context, _ []string, _ io.Reader, _, _ io.Writer, _ buildcli.RunOptions) int {
+		return 0
+	}
+	app.dependencies = *dependencies
+
+	jobID, err := app.StartBuild(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	progress := recorder.waitForProgress(t, "error")
+	if !strings.Contains(progress.Message, "could not be verified") {
+		t.Fatalf("terminal progress = %#v", progress)
+	}
+	if _, err := app.CopyBuildArtifactToDesktop(jobID); err == nil {
+		t.Fatal("missing artifact became eligible for Desktop copying")
+	}
+}
+
+func TestCopyBuildArtifactToDesktopRejectsChangedArtifact(t *testing.T) {
+	t.Parallel()
+	recorder := newEventRecorder()
+	app, request, dependencies := testApp(t, recorder)
+	desktop := t.TempDir()
+	dependencies.desktopDirectory = func() (string, error) { return desktop, nil }
+	dependencies.builder = func(_ context.Context, _ []string, _ io.Reader, _, _ io.Writer, _ buildcli.RunOptions) int {
+		if err := os.WriteFile(request.Output, []byte("original SFX"), 0o700); err != nil {
+			t.Errorf("write source artifact: %v", err)
+			return 1
+		}
+		return 0
+	}
+	app.dependencies = *dependencies
+
+	jobID, err := app.StartBuild(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	recorder.waitForProgress(t, "success")
+	if err := os.Remove(request.Output); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(request.Output, []byte("replacement SFX"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := app.CopyBuildArtifactToDesktop(jobID); err == nil || !strings.Contains(err.Error(), "changed") {
+		t.Fatalf("changed artifact copy error = %v", err)
+	}
+}
+
+func TestStartBuildRejectsWhileDesktopCopyIsInProgress(t *testing.T) {
+	t.Parallel()
+	recorder := newEventRecorder()
+	app, request, dependencies := testApp(t, recorder)
+	desktop := t.TempDir()
+	resolverEntered := make(chan struct{})
+	releaseResolver := make(chan struct{})
+	dependencies.desktopDirectory = func() (string, error) {
+		close(resolverEntered)
+		<-releaseResolver
+		return desktop, nil
+	}
+	dependencies.builder = func(_ context.Context, _ []string, _ io.Reader, _, _ io.Writer, _ buildcli.RunOptions) int {
+		if err := os.WriteFile(request.Output, []byte("verified SFX"), 0o700); err != nil {
+			t.Errorf("write source artifact: %v", err)
+			return 1
+		}
+		return 0
+	}
+	app.dependencies = *dependencies
+
+	jobID, err := app.StartBuild(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	recorder.waitForProgress(t, "success")
+	copyResult := make(chan error, 1)
+	go func() {
+		_, copyErr := app.CopyBuildArtifactToDesktop(jobID)
+		copyResult <- copyErr
+	}()
+	<-resolverEntered
+	if _, err := app.StartBuild(request); err == nil || !strings.Contains(err.Error(), "copied to Desktop") {
+		t.Fatalf("StartBuild() during copy error = %v", err)
+	}
+	close(releaseResolver)
+	if err := <-copyResult; err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestShutdownCancelsAndWaitsForActiveBuild(t *testing.T) {
 	t.Parallel()
 	recorder := newEventRecorder()
@@ -339,5 +546,60 @@ func TestShutdownCancelsAndWaitsForActiveBuild(t *testing.T) {
 	}
 	if _, err := app.StartBuild(request); err == nil || !strings.Contains(err.Error(), "shutting down") {
 		t.Fatalf("StartBuild() after shutdown error = %v", err)
+	}
+}
+
+func TestShutdownCancelsAndWaitsForDesktopCopy(t *testing.T) {
+	t.Parallel()
+	recorder := newEventRecorder()
+	app, request, dependencies := testApp(t, recorder)
+	desktop := t.TempDir()
+	copyStarted := make(chan struct{})
+	copyStopped := make(chan struct{})
+	dependencies.desktopDirectory = func() (string, error) { return desktop, nil }
+	dependencies.builder = func(_ context.Context, _ []string, _ io.Reader, _, _ io.Writer, _ buildcli.RunOptions) int {
+		if err := os.WriteFile(request.Output, []byte("verified SFX"), 0o700); err != nil {
+			t.Errorf("write source artifact: %v", err)
+			return 1
+		}
+		return 0
+	}
+	dependencies.copyArtifact = func(ctx context.Context, _ *completedArtifact, _ string) (string, error) {
+		close(copyStarted)
+		<-ctx.Done()
+		close(copyStopped)
+		return "", ctx.Err()
+	}
+	app.dependencies = *dependencies
+
+	jobID, err := app.StartBuild(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	recorder.waitForProgress(t, "success")
+	copyResult := make(chan error, 1)
+	go func() {
+		_, copyErr := app.CopyBuildArtifactToDesktop(jobID)
+		copyResult <- copyErr
+	}()
+	<-copyStarted
+	if preventClose := app.beforeClose(context.Background()); preventClose {
+		t.Fatal("beforeClose() prevented close")
+	}
+	select {
+	case <-copyStopped:
+	default:
+		t.Fatal("shutdown returned before the Desktop copy stopped")
+	}
+	select {
+	case copyErr := <-copyResult:
+		if !errors.Is(copyErr, context.Canceled) {
+			t.Fatalf("Desktop copy error = %v, want context cancellation", copyErr)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Desktop copy did not return after shutdown")
+	}
+	if _, err := app.CopyBuildArtifactToDesktop(jobID); err == nil || !strings.Contains(err.Error(), "shutting down") {
+		t.Fatalf("CopyBuildArtifactToDesktop() after shutdown error = %v", err)
 	}
 }

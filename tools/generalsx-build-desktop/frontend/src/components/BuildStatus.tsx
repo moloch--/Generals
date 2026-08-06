@@ -5,9 +5,21 @@ import {Chip} from "@heroui/react/chip";
 import {Label} from "@heroui/react/label";
 import {ProgressBar} from "@heroui/react/progress-bar";
 import {ScrollShadow} from "@heroui/react/scroll-shadow";
+import {useState} from "react";
 
+import {CleanupBuildDialog} from "./CleanupBuildDialog";
+import {
+  canDismissCleanup,
+  idleCleanupFeedback,
+  loadCleanupPlan,
+  runBuildCleanup,
+} from "../lib/cleanupFeedback";
+import type {CleanupFeedback} from "../lib/cleanupFeedback";
+import {idleCopyFeedback, runDesktopCopy} from "../lib/copyFeedback";
+import type {CopyFeedback} from "../lib/copyFeedback";
+import {selectPostBuildActions} from "../lib/postBuildActions";
 import {formatPhase} from "../lib/request";
-import type {BuildLogEvent, BuildProgressEvent, ExecutionState} from "../types";
+import type {BuildCleanupPlan, BuildLogEvent, BuildProgressEvent, ExecutionState} from "../types";
 
 interface BuildStatusProps {
   state: ExecutionState;
@@ -17,6 +29,9 @@ interface BuildStatusProps {
   output: string;
   dryRun: boolean;
   onCancel: () => void;
+  onCleanup: (planId: string) => Promise<string>;
+  onCopyToDesktop: () => Promise<string>;
+  onGetCleanupPlan: () => Promise<BuildCleanupPlan>;
   onReset: () => void;
 }
 
@@ -36,7 +51,23 @@ function statusChip(state: ExecutionState) {
   return {color: "accent" as const, label: state === "validating" ? "Validating" : "Running"};
 }
 
-export function BuildStatus({state, progress, logs, error, output, dryRun, onCancel, onReset}: BuildStatusProps) {
+export function BuildStatus({
+  state,
+  progress,
+  logs,
+  error,
+  output,
+  dryRun,
+  onCancel,
+  onCleanup,
+  onCopyToDesktop,
+  onGetCleanupPlan,
+  onReset,
+}: BuildStatusProps) {
+  const [copyFeedback, setCopyFeedback] = useState<CopyFeedback>(idleCopyFeedback);
+  const [cleanupFeedback, setCleanupFeedback] = useState<CleanupFeedback>(idleCleanupFeedback);
+  const [isCleanupDialogOpen, setIsCleanupDialogOpen] = useState(false);
+
   if (state === "idle") {
     return null;
   }
@@ -46,9 +77,42 @@ export function BuildStatus({state, progress, logs, error, output, dryRun, onCan
   const isIndeterminate = state === "validating" || (isActive && (progress?.percent ?? 0) < 0);
   const percent = Math.min(100, Math.max(0, progress?.percent ?? 0));
   const phase = progress?.phase ? formatPhase(progress.phase) : "Request Validation";
+  const postBuildActions = selectPostBuildActions(
+    state,
+    dryRun,
+    copyFeedback.status,
+    cleanupFeedback.status,
+  );
+
+  // GeneralsX @feature Codex 05/08/2026 Require an exact backend cleanup plan before showing confirmation.
+  const openCleanupDialog = async () => {
+    const plan = await loadCleanupPlan(onGetCleanupPlan, setCleanupFeedback);
+    if (plan) {
+      setIsCleanupDialogOpen(true);
+    }
+  };
+
+  const changeCleanupDialogOpen = (open: boolean) => {
+    if (!canDismissCleanup(cleanupFeedback.status)) {
+      return;
+    }
+    setIsCleanupDialogOpen(open);
+    if (!open && cleanupFeedback.status === "ready") {
+      setCleanupFeedback(idleCleanupFeedback);
+    }
+  };
+
+  const confirmCleanup = async () => {
+    const plan = cleanupFeedback.plan;
+    if (!plan || cleanupFeedback.status !== "ready") {
+      return;
+    }
+    await runBuildCleanup(() => onCleanup(plan.planId), plan, setCleanupFeedback);
+    setIsCleanupDialogOpen(false);
+  };
 
   return (
-    <Card aria-busy={isActive} className="w-full" variant="secondary">
+    <Card aria-busy={isActive || postBuildActions.isBusy} className="w-full" variant="secondary">
       <Card.Header className="flex-row items-start justify-between gap-4">
         <div>
           <Card.Title>Build Activity</Card.Title>
@@ -79,10 +143,53 @@ export function BuildStatus({state, progress, logs, error, output, dryRun, onCan
           <Alert status="success">
             <Alert.Indicator />
             <Alert.Content>
-              <Alert.Title>{dryRun ? "Dry-run plan complete" : "Verified artifact created"}</Alert.Title>
-              <Alert.Description className="break-all">
-                {dryRun ? "No artifact was written and SteamCMD was not invoked." : output}
+              <Alert.Title>
+                {dryRun
+                  ? "Dry-run plan complete"
+                  : cleanupFeedback.status === "cleaned"
+                    ? "Build files cleaned up"
+                    : copyFeedback.status === "copied"
+                      ? "Copied to Desktop"
+                      : "Verified artifact created"}
+              </Alert.Title>
+              <Alert.Description aria-live="polite" className="break-all">
+                {dryRun
+                  ? "No artifact was written and SteamCMD was not invoked."
+                  : cleanupFeedback.status === "cleaned"
+                    ? (
+                        <>
+                          <span className="block">{cleanupFeedback.message}</span>
+                          <span className="mt-1 block">
+                            Desktop copy preserved at {cleanupFeedback.plan?.desktopCopyPath || copyFeedback.message}.
+                          </span>
+                        </>
+                      )
+                  : copyFeedback.status === "copied"
+                    ? copyFeedback.message
+                    : output}
               </Alert.Description>
+            </Alert.Content>
+          </Alert>
+        ) : null}
+
+        {copyFeedback.status === "error" ? (
+          <Alert role="alert" status="danger">
+            <Alert.Indicator />
+            <Alert.Content>
+              <Alert.Title>Could not copy to Desktop</Alert.Title>
+              <Alert.Description>{copyFeedback.message}</Alert.Description>
+            </Alert.Content>
+          </Alert>
+        ) : null}
+
+        {cleanupFeedback.status === "error" ? (
+          <Alert role="alert" status="danger">
+            <Alert.Indicator />
+            <Alert.Content>
+              <Alert.Title>
+                {cleanupFeedback.plan ? "Could not clean up build files" : "Could not prepare cleanup"}
+              </Alert.Title>
+              <Alert.Description>{cleanupFeedback.message}</Alert.Description>
             </Alert.Content>
           </Alert>
         ) : null}
@@ -122,7 +229,7 @@ export function BuildStatus({state, progress, logs, error, output, dryRun, onCan
         </section>
       </Card.Content>
 
-      <Card.Footer className="flex justify-end gap-3">
+      <Card.Footer className="flex flex-wrap justify-end gap-3">
         {isActive ? (
           <Button
             isDisabled={state === "validating" || state === "cancelling"}
@@ -132,7 +239,40 @@ export function BuildStatus({state, progress, logs, error, output, dryRun, onCan
             {state === "cancelling" ? "Cancelling…" : "Cancel build"}
           </Button>
         ) : (
-          <Button variant="secondary" onPress={onReset}>Review settings</Button>
+          <>
+            <Button
+              isDisabled={!postBuildActions.canReset}
+              variant="secondary"
+              onPress={onReset}
+            >
+              Review settings
+            </Button>
+            {postBuildActions.showCleanup ? (
+              <CleanupBuildDialog
+                isDisabled={postBuildActions.cleanupDisabled}
+                isOpen={isCleanupDialogOpen}
+                plan={cleanupFeedback.plan}
+                status={cleanupFeedback.status}
+                onConfirm={() => void confirmCleanup()}
+                onOpen={() => void openCleanupDialog()}
+                onOpenChange={changeCleanupDialogOpen}
+              />
+            ) : null}
+            {postBuildActions.showCopy ? (
+              <Button
+                className="min-w-44"
+                isDisabled={postBuildActions.copyDisabled}
+                isPending={copyFeedback.status === "pending"}
+                onPress={() => void runDesktopCopy(onCopyToDesktop, setCopyFeedback)}
+              >
+                {copyFeedback.status === "pending"
+                  ? "Copying…"
+                  : copyFeedback.status === "copied"
+                    ? "Copied to Desktop"
+                    : "Copy to Desktop"}
+              </Button>
+            ) : null}
+          </>
         )}
       </Card.Footer>
     </Card>

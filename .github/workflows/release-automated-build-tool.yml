@@ -485,7 +485,7 @@ jobs:
           git update-index --no-assume-unchanged -- "${config}"
           git diff --exit-code -- "${config}"
 
-      - name: Smoke and package macOS application
+      - name: Smoke and stage macOS release assets
         if: matrix.platform == 'macos'
         shell: bash
         run: |
@@ -515,18 +515,31 @@ jobs:
           codesign --force --deep --sign - "${app}"
           codesign --verify --deep --strict "${app}"
 
-          package="generalsx-build-${RELEASE_VERSION}-macos-arm64"
-          stage="${RUNNER_TEMP}/${package}"
-          mkdir -p "${stage}"
-          cp -R "${app}" "${stage}/"
-          cp "${headless}" "${stage}/generalsx-build"
-          cp LICENSE.md "${stage}/LICENSE.md"
-          cp tools/generalsx-build-desktop/THIRD_PARTY_NOTICES.md "${stage}/THIRD_PARTY_NOTICES.md"
+          # GeneralsX @build Codex 05/08/2026 Keep the GUI and headless tool as independent release downloads.
           mkdir -p dist
-          ditto -c -k --keepParent "${stage}" "dist/${package}.zip"
-          test -s "dist/${package}.zip"
+          dmg_stage="${RUNNER_TEMP}/generalsx-build-dmg"
+          mkdir -p "${dmg_stage}"
+          cp -R "${app}" "${dmg_stage}/"
+          ln -s /Applications "${dmg_stage}/Applications"
 
-      - name: Smoke and package Linux application
+          desktop_asset="dist/generalsx-build-desktop-${RELEASE_VERSION}-macos-arm64.dmg"
+          headless_asset="dist/generalsx-build-${RELEASE_VERSION}-macos-arm64"
+          hdiutil create \
+            -quiet \
+            -ov \
+            -format UDZO \
+            -fs HFS+ \
+            -volname 'GeneralsX Automated Build Tool' \
+            -srcfolder "${dmg_stage}" \
+            "${desktop_asset}"
+          cp "${headless}" "${headless_asset}"
+          chmod 0755 "${headless_asset}"
+
+          hdiutil verify "${desktop_asset}"
+          test -s "${desktop_asset}"
+          test -s "${headless_asset}"
+
+      - name: Smoke and stage Linux release assets
         if: matrix.platform == 'linux'
         shell: bash
         run: |
@@ -549,27 +562,15 @@ jobs:
             exit 1
           fi
 
-          package="generalsx-build-${RELEASE_VERSION}-linux-amd64"
-          stage="${RUNNER_TEMP}/${package}"
-          mkdir -p "${stage}"
-          cp "${desktop}" "${stage}/generalsx-build-desktop"
-          cp "${headless}" "${stage}/generalsx-build"
-          cp LICENSE.md "${stage}/LICENSE.md"
-          cp tools/generalsx-build-desktop/THIRD_PARTY_NOTICES.md "${stage}/THIRD_PARTY_NOTICES.md"
-
-          source_date_epoch="$(git show -s --format=%ct "${SOURCE_COMMIT}")"
           mkdir -p dist
-          tar --sort=name \
-            --mtime="@${source_date_epoch}" \
-            --owner=0 \
-            --group=0 \
-            --numeric-owner \
-            -C "${RUNNER_TEMP}" \
-            -cf - "${package}" \
-            | gzip -n > "dist/${package}.tar.gz"
-          test -s "dist/${package}.tar.gz"
+          desktop_asset="dist/generalsx-build-desktop-${RELEASE_VERSION}-linux-amd64"
+          headless_asset="dist/generalsx-build-${RELEASE_VERSION}-linux-amd64"
+          install -m 0755 "${desktop}" "${desktop_asset}"
+          install -m 0755 "${headless}" "${headless_asset}"
+          test -s "${desktop_asset}"
+          test -s "${headless_asset}"
 
-      - name: Smoke and package Windows application
+      - name: Smoke and stage Windows release assets
         if: matrix.platform == 'windows'
         shell: pwsh
         run: |
@@ -603,21 +604,17 @@ jobs:
           Stop-Process -Id $process.Id -Force
           $process.WaitForExit()
 
-          $package = "generalsx-build-$env:RELEASE_VERSION-windows-amd64"
-          $stage = Join-Path $env:RUNNER_TEMP $package
-          New-Item -ItemType Directory -Path $stage | Out-Null
-          Copy-Item $desktop (Join-Path $stage 'generalsx-build-desktop.exe')
-          Copy-Item $headless (Join-Path $stage 'generalsx-build.exe')
-          Copy-Item 'LICENSE.md' (Join-Path $stage 'LICENSE.md')
-          Copy-Item 'tools\generalsx-build-desktop\THIRD_PARTY_NOTICES.md' `
-            (Join-Path $stage 'THIRD_PARTY_NOTICES.md')
-          New-Item -ItemType Directory -Path dist | Out-Null
-          Compress-Archive -Path $stage -DestinationPath "dist\$package.zip" -CompressionLevel Optimal
-          if (-not (Test-Path "dist\$package.zip" -PathType Leaf)) {
-            throw 'Windows release archive was not created.'
+          New-Item -ItemType Directory -Path dist -Force | Out-Null
+          $desktopAsset = "dist\generalsx-build-desktop-$env:RELEASE_VERSION-windows-amd64.exe"
+          $headlessAsset = "dist\generalsx-build-$env:RELEASE_VERSION-windows-amd64.exe"
+          Copy-Item $desktop $desktopAsset
+          Copy-Item $headless $headlessAsset
+          if (-not (Test-Path $desktopAsset -PathType Leaf) -or
+              -not (Test-Path $headlessAsset -PathType Leaf)) {
+            throw 'Windows release executables were not staged.'
           }
 
-      - name: Verify packaged payload names
+      - name: Verify native release asset names
         shell: bash
         env:
           TARGET_PLATFORM: ${{ matrix.platform }}
@@ -626,28 +623,50 @@ jobs:
           set -euo pipefail
 
           case "${TARGET_PLATFORM}" in
-            linux) extension='tar.gz' ;;
-            macos|windows) extension='zip' ;;
+            macos)
+              expected=(
+                "generalsx-build-desktop-${RELEASE_VERSION}-macos-arm64.dmg"
+                "generalsx-build-${RELEASE_VERSION}-macos-arm64"
+              )
+              ;;
+            linux)
+              expected=(
+                "generalsx-build-desktop-${RELEASE_VERSION}-linux-amd64"
+                "generalsx-build-${RELEASE_VERSION}-linux-amd64"
+              )
+              ;;
+            windows)
+              expected=(
+                "generalsx-build-desktop-${RELEASE_VERSION}-windows-amd64.exe"
+                "generalsx-build-${RELEASE_VERSION}-windows-amd64.exe"
+              )
+              ;;
             *) echo "::error::Unsupported matrix platform ${TARGET_PLATFORM}."; exit 1 ;;
           esac
-          expected="generalsx-build-${RELEASE_VERSION}-${TARGET_PLATFORM}-${TARGET_ARCH}.${extension}"
           shopt -s nullglob
-          packaged_paths=(dist/*)
-          if [[ "${#packaged_paths[@]}" -ne 1 ]]; then
-            echo "::error::Expected only ${expected} in the release artifact."
-            printf '%s\n' "${packaged_paths[@]}"
+          asset_paths=(dist/*)
+          actual=()
+          for asset_path in "${asset_paths[@]}"; do
+            if [[ ! -f "${asset_path}" ]]; then
+              echo "::error::Unexpected non-file release asset ${asset_path}."
+              exit 1
+            fi
+            actual+=("${asset_path##*/}")
+          done
+          if ! diff -u \
+            <(printf '%s\n' "${expected[@]}" | sort) \
+            <(printf '%s\n' "${actual[@]}"); then
+            echo "::error::${TARGET_PLATFORM}/${TARGET_ARCH} release assets do not match the exact expected set."
             exit 1
           fi
-          packaged="${packaged_paths[0]##*/}"
-          if [[ "${packaged}" != "${expected}" ]]; then
-            echo "::error::Expected only ${expected} in the release artifact, found ${packaged}."
-            exit 1
-          fi
+          for asset in "${expected[@]}"; do
+            test -s "dist/${asset}"
+          done
 
-      - name: Upload native release package
+      - name: Upload native release assets
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
-          name: release-package-${{ matrix.platform }}-${{ matrix.arch }}
+          name: release-assets-${{ matrix.platform }}-${{ matrix.arch }}
           path: dist/*
           if-no-files-found: error
           compression-level: 0
@@ -668,14 +687,14 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Download native release packages
+      - name: Download native release assets
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
-          pattern: release-package-*
+          pattern: release-assets-*
           path: dist
           merge-multiple: true
 
-      - name: Verify packages and generate checksums
+      - name: Verify assets and generate checksums
         shell: bash
         env:
           RELEASE_VERSION: ${{ needs.verify-source.outputs.release_version }}
@@ -683,15 +702,22 @@ jobs:
           set -euo pipefail
 
           expected=(
-            "generalsx-build-${RELEASE_VERSION}-linux-amd64.tar.gz"
-            "generalsx-build-${RELEASE_VERSION}-macos-arm64.zip"
-            "generalsx-build-${RELEASE_VERSION}-windows-amd64.zip"
+            'LICENSE.md'
+            'THIRD_PARTY_NOTICES.md'
+            "generalsx-build-desktop-${RELEASE_VERSION}-linux-amd64"
+            "generalsx-build-desktop-${RELEASE_VERSION}-macos-arm64.dmg"
+            "generalsx-build-desktop-${RELEASE_VERSION}-windows-amd64.exe"
+            "generalsx-build-${RELEASE_VERSION}-linux-amd64"
+            "generalsx-build-${RELEASE_VERSION}-macos-arm64"
+            "generalsx-build-${RELEASE_VERSION}-windows-amd64.exe"
           )
+          cp LICENSE.md dist/LICENSE.md
+          cp tools/generalsx-build-desktop/THIRD_PARTY_NOTICES.md dist/THIRD_PARTY_NOTICES.md
           mapfile -t actual < <(find dist -maxdepth 1 -type f -printf '%f\n' | sort)
           if ! diff -u \
             <(printf '%s\n' "${expected[@]}" | sort) \
             <(printf '%s\n' "${actual[@]}"); then
-            echo '::error::Downloaded release packages do not match the exact supported-platform set.'
+            echo '::error::Downloaded release assets do not match the exact supported-platform set.'
             exit 1
           fi
 
@@ -741,7 +767,9 @@ jobs:
             '- Linux: x86-64 (amd64), WebKitGTK 4.1' \
             '- Windows: x86-64 (amd64), embedded WebView2 bootstrapper' \
             '' \
-            'Each archive contains the desktop application, the `generalsx-build` headless tool, `LICENSE.md`, and `THIRD_PARTY_NOTICES.md`. No retail game data is included. Verify downloads with `SHA256SUMS`.' \
+            'Desktop applications and `generalsx-build` headless tools are separate downloads. The macOS desktop app is delivered in a DMG so its signed `.app` bundle remains intact; Linux and Windows desktop executables are attached directly.' \
+            '' \
+            'After downloading a direct macOS or Linux executable, run `chmod +x PATH` before launching it. The macOS application is ad-hoc signed and is not notarized. No retail game data is included. Verify downloads with `SHA256SUMS`; licensing details are attached separately.' \
             > "${notes}"
 
           if draft_state="$(gh release view "${RELEASE_VERSION}" --json isDraft --jq '.isDraft' 2>/dev/null)"; then
@@ -764,9 +792,14 @@ jobs:
           )
           expected_assets=(
             'SHA256SUMS'
-            "generalsx-build-${RELEASE_VERSION}-linux-amd64.tar.gz"
-            "generalsx-build-${RELEASE_VERSION}-macos-arm64.zip"
-            "generalsx-build-${RELEASE_VERSION}-windows-amd64.zip"
+            'LICENSE.md'
+            'THIRD_PARTY_NOTICES.md'
+            "generalsx-build-desktop-${RELEASE_VERSION}-linux-amd64"
+            "generalsx-build-desktop-${RELEASE_VERSION}-macos-arm64.dmg"
+            "generalsx-build-desktop-${RELEASE_VERSION}-windows-amd64.exe"
+            "generalsx-build-${RELEASE_VERSION}-linux-amd64"
+            "generalsx-build-${RELEASE_VERSION}-macos-arm64"
+            "generalsx-build-${RELEASE_VERSION}-windows-amd64.exe"
           )
           for asset in "${existing_assets[@]}"; do
             if ! printf '%s\n' "${expected_assets[@]}" | grep -Fqx -- "${asset}"; then
@@ -781,9 +814,7 @@ jobs:
             --title "GeneralsX Automated Build Tool ${RELEASE_VERSION}" \
             --notes-file "${notes}"
           gh release upload "${RELEASE_VERSION}" \
-            dist/SHA256SUMS \
-            dist/generalsx-build-*.tar.gz \
-            dist/generalsx-build-*.zip \
+            dist/* \
             --clobber
 
       - name: Verify exact draft assets and publish
@@ -798,9 +829,14 @@ jobs:
 
           expected_assets=(
             'SHA256SUMS'
-            "generalsx-build-${RELEASE_VERSION}-linux-amd64.tar.gz"
-            "generalsx-build-${RELEASE_VERSION}-macos-arm64.zip"
-            "generalsx-build-${RELEASE_VERSION}-windows-amd64.zip"
+            'LICENSE.md'
+            'THIRD_PARTY_NOTICES.md'
+            "generalsx-build-desktop-${RELEASE_VERSION}-linux-amd64"
+            "generalsx-build-desktop-${RELEASE_VERSION}-macos-arm64.dmg"
+            "generalsx-build-desktop-${RELEASE_VERSION}-windows-amd64.exe"
+            "generalsx-build-${RELEASE_VERSION}-linux-amd64"
+            "generalsx-build-${RELEASE_VERSION}-macos-arm64"
+            "generalsx-build-${RELEASE_VERSION}-windows-amd64.exe"
           )
           mapfile -t remote_assets < <(
             gh release view "${RELEASE_VERSION}" --json assets \

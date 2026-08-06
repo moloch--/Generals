@@ -41,11 +41,18 @@ type LogEvent struct {
 type buildMainFunc func(context.Context, []string, io.Reader, io.Writer, io.Writer, buildcli.RunOptions) int
 type emitEventFunc func(context.Context, string, interface{})
 type chooseDirectoryFunc func(context.Context, wailsruntime.OpenDialogOptions) (string, error)
+type copyArtifactFunc func(context.Context, *completedArtifact, string) (string, error)
+type verifyArtifactFunc func(context.Context, string, string) error
+type cleanupBuildFunc func(context.Context, *buildCleanupReceipt) (string, error)
 
 type appDependencies struct {
 	builder           buildMainFunc
 	emit              emitEventFunc
 	chooseDirectory   chooseDirectoryFunc
+	desktopDirectory  func() (string, error)
+	copyArtifact      copyArtifactFunc
+	verifyArtifact    verifyArtifactFunc
+	cleanupBuild      cleanupBuildFunc
 	interactiveRunner buildcli.InteractiveCommandRunner
 	newJobID          func() string
 	loadDefaults      func() (buildcli.ConfigurationDefaults, error)
@@ -60,6 +67,9 @@ type appDependencies struct {
 type activeBuild struct {
 	id              string
 	phase           string
+	artifactPath    string
+	dryRun          bool
+	cleanupSnapshot *buildCleanupSnapshot
 	cancel          context.CancelFunc
 	done            chan struct{}
 	cancelRequested bool
@@ -70,11 +80,22 @@ type activeBuild struct {
 
 // App is the bound Wails backend for one automated build at a time.
 type App struct {
-	mu           sync.Mutex
-	ctx          context.Context
-	active       *activeBuild
-	shuttingDown bool
-	dependencies appDependencies
+	mu                sync.Mutex
+	ctx               context.Context
+	active            *activeBuild
+	completedArtifact *completedArtifact
+	desktopArtifact   *completedArtifact
+	cleanupReceipt    *buildCleanupReceipt
+	preparedCleanup   *preparedCleanupPlan
+	cleanupPlanning   bool
+	copyInProgress    bool
+	copyCancel        context.CancelFunc
+	copyDone          chan struct{}
+	cleanupInProgress bool
+	cleanupCancel     context.CancelFunc
+	cleanupDone       chan struct{}
+	shuttingDown      bool
+	dependencies      appDependencies
 }
 
 // NewApp constructs the production Wails backend.
@@ -95,6 +116,12 @@ func defaultAppDependencies() appDependencies {
 		chooseDirectory: func(ctx context.Context, options wailsruntime.OpenDialogOptions) (string, error) {
 			return wailsruntime.OpenDirectoryDialog(ctx, options)
 		},
+		desktopDirectory: systemDesktopDirectory,
+		copyArtifact:     copyCompletedArtifactToDirectory,
+		verifyArtifact: func(ctx context.Context, path, target string) error {
+			return verifySFXArtifact(ctx, path, target, runtime.GOOS)
+		},
+		cleanupBuild:      executeBuildCleanup,
 		interactiveRunner: newTerminalInteractiveRunner(),
 		newJobID:          generateJobID,
 		loadDefaults:      buildcli.LoadConfigurationDefaults,
@@ -162,6 +189,15 @@ func (a *App) StartBuild(request BuildRequest) (string, error) {
 	if err := validationError(a.ValidateBuild(request)); err != nil {
 		return "", err
 	}
+	artifactPath := ""
+	if !request.DryRun {
+		var err error
+		artifactPath, err = effectiveArtifactPath(request, a.dependencies.hostOS)
+		if err != nil {
+			return "", fmt.Errorf("resolve SFX output path: %w", err)
+		}
+	}
+	cleanupSnapshot := snapshotBuildCleanup(request, a.dependencies.hostOS)
 
 	a.mu.Lock()
 	if a.shuttingDown {
@@ -172,15 +208,36 @@ func (a *App) StartBuild(request BuildRequest) (string, error) {
 		a.mu.Unlock()
 		return "", errors.New("desktop runtime is not ready")
 	}
+	if a.copyInProgress {
+		a.mu.Unlock()
+		return "", errors.New("the SFX artifact is still being copied to Desktop")
+	}
+	if a.cleanupPlanning {
+		a.mu.Unlock()
+		return "", errors.New("a cleanup plan is still being prepared")
+	}
+	if a.cleanupInProgress {
+		a.mu.Unlock()
+		return "", errors.New("build files are still being cleaned up")
+	}
 	if a.active != nil {
 		a.mu.Unlock()
 		return "", errors.New("a build is already running")
 	}
 	jobID := a.dependencies.newJobID()
 	buildContext, cancel := context.WithCancel(a.ctx)
-	job := &activeBuild{id: jobID, phase: "preflight", cancel: cancel, done: make(chan struct{})}
+	job := &activeBuild{
+		id: jobID, phase: "preflight", artifactPath: artifactPath, dryRun: request.DryRun,
+		cleanupSnapshot: cleanupSnapshot, cancel: cancel, done: make(chan struct{}),
+	}
+	previousCleanupReceipt := a.cleanupReceipt
+	a.completedArtifact = nil
+	a.desktopArtifact = nil
+	a.cleanupReceipt = nil
+	a.preparedCleanup = nil
 	a.active = job
 	a.mu.Unlock()
+	discardBuildCleanupReceipt(previousCleanupReceipt)
 
 	a.emitJobProgress(a.runtimeContext(), job, ProgressEvent{
 		JobID: jobID, Phase: "preflight", Status: "running",
@@ -217,8 +274,31 @@ func (a *App) runBuild(ctx context.Context, job *activeBuild, arguments []string
 	a.mu.Lock()
 	phase := job.phase
 	cancelled := job.cancelRequested || ctx.Err() != nil
-	job.finished = true
 	a.mu.Unlock()
+
+	var artifactErr error
+	var completedArtifact *completedArtifact
+	var cleanupReceipt *buildCleanupReceipt
+	if !cancelled && exitCode == 0 && !job.dryRun {
+		completed, err := inspectCompletedArtifactContext(ctx, job.id, job.artifactPath)
+		if err != nil {
+			artifactErr = err
+		} else {
+			completedArtifact = completed
+			cleanupReceipt = finalizeBuildCleanup(job.id, job.cleanupSnapshot)
+		}
+	}
+	a.mu.Lock()
+	cancelled = job.cancelRequested || ctx.Err() != nil
+	job.finished = true
+	if !cancelled && artifactErr == nil && completedArtifact != nil {
+		a.completedArtifact = completedArtifact
+		a.cleanupReceipt = cleanupReceipt
+	}
+	a.mu.Unlock()
+	if cancelled && cleanupReceipt != nil {
+		discardBuildCleanupReceipt(cleanupReceipt)
+	}
 
 	progress := ProgressEvent{
 		JobID: job.id, Phase: phase, Percent: -1, ExitCode: exitCode,
@@ -226,6 +306,10 @@ func (a *App) runBuild(ctx context.Context, job *activeBuild, arguments []string
 	if cancelled {
 		progress.Status = "cancelled"
 		progress.Message = "Build cancelled"
+	} else if artifactErr != nil {
+		progress.Status = "error"
+		progress.Message = fmt.Sprintf("Build completed but the SFX artifact could not be verified: %v", artifactErr)
+		progress.ExitCode = 1
 	} else if exitCode == 0 {
 		progress.Status = "success"
 		progress.Message = "Build completed"
@@ -358,23 +442,57 @@ func (a *App) beforeClose(ctx context.Context) bool {
 	return false
 }
 
-// GeneralsX @build Codex 05/08/2026 Cancel active subprocesses and wait briefly before the native window exits.
+// GeneralsX @build Codex 05/08/2026 Cancel active build, copy, and cleanup work, then wait briefly before the native window exits.
 func (a *App) shutdown(context.Context) {
 	a.mu.Lock()
 	a.shuttingDown = true
 	job := a.active
+	copyCancel := a.copyCancel
+	copyDone := a.copyDone
+	cleanupCancel := a.cleanupCancel
+	cleanupDone := a.cleanupDone
 	if job != nil && !job.finished {
 		job.cancelRequested = true
 		job.cancel()
 	}
+	if copyCancel != nil {
+		copyCancel()
+	}
+	if cleanupCancel != nil {
+		cleanupCancel()
+	}
 	a.mu.Unlock()
-	if job == nil {
-		return
+
+	doneChannels := make([]<-chan struct{}, 0, 3)
+	if job != nil {
+		doneChannels = append(doneChannels, job.done)
 	}
-	timer := time.NewTimer(a.dependencies.shutdownTimeout)
-	defer timer.Stop()
-	select {
-	case <-job.done:
-	case <-timer.C:
+	if copyDone != nil {
+		doneChannels = append(doneChannels, copyDone)
 	}
+	if cleanupDone != nil {
+		doneChannels = append(doneChannels, cleanupDone)
+	}
+	if len(doneChannels) > 0 {
+		timer := time.NewTimer(a.dependencies.shutdownTimeout)
+		defer timer.Stop()
+		for _, done := range doneChannels {
+			select {
+			case <-done:
+			case <-timer.C:
+				return
+			}
+		}
+	}
+
+	a.mu.Lock()
+	cleanupReceipt := a.cleanupReceipt
+	if a.active != nil || a.copyInProgress || a.cleanupInProgress {
+		cleanupReceipt = nil
+	} else {
+		a.cleanupReceipt = nil
+		a.preparedCleanup = nil
+	}
+	a.mu.Unlock()
+	discardBuildCleanupReceipt(cleanupReceipt)
 }

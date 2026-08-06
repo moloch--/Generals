@@ -192,6 +192,26 @@ func resolveTarget(value, hostOS string) (string, error) {
 	}
 }
 
+// GeneralsX @bugfix Codex 05/08/2026 Mirror the CLI's blank-output defaults when recording the completed GUI artifact.
+func effectiveArtifactPath(request BuildRequest, hostOS string) (string, error) {
+	target, err := resolveTarget(request.Target, hostOS)
+	if err != nil {
+		return "", err
+	}
+	output := request.Output
+	if output == "" {
+		name := "GeneralsXZH-linux-amd64-sfx"
+		switch target {
+		case "macos":
+			name = "GeneralsXZH-macos-arm64-sfx"
+		case "windows":
+			name = "GeneralsXZH-windows-amd64-sfx.exe"
+		}
+		output = filepath.Join(request.RepoRoot, "build", "sfx", name)
+	}
+	return filepath.Abs(output)
+}
+
 func validateHostTarget(target, hostOS, hostArch string) error {
 	switch target {
 	case "macos":

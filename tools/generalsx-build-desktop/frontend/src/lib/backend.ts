@@ -1,6 +1,7 @@
 import {emptyBuildRequest, validateAllSteps} from "./request";
 import {selectDesktopBackendMode} from "./backendMode";
 import type {
+  BuildCleanupPlan,
   BuildLogEvent,
   BuildProgressEvent,
   BuildRequest,
@@ -14,6 +15,9 @@ interface WailsAppBinding {
   ChooseDirectory(kind: DirectoryKind, current: string): Promise<string>;
   ValidateBuild(request: BuildRequest): Promise<ValidationIssue[]>;
   StartBuild(request: BuildRequest): Promise<string>;
+  CopyBuildArtifactToDesktop(jobId: string): Promise<string>;
+  GetBuildCleanupPlan(jobId: string): Promise<BuildCleanupPlan>;
+  CleanupBuild(jobId: string, planId: string): Promise<string>;
   CancelBuild(): Promise<boolean>;
 }
 
@@ -40,6 +44,14 @@ const logListeners = new Set<LogListener>();
 let mockTimers: number[] = [];
 let mockJobId = "";
 let mockPercent = 0;
+let mockArtifactPath = "";
+let mockDryRun = false;
+let mockArtifactVerified = false;
+let mockDesktopCopyPath = "";
+let mockCleanupPlanId = "";
+let mockCleanupPlanSequence = 0;
+let mockCleanupCompleted = false;
+let mockCleanupInProgress = false;
 
 function wailsApp(): WailsAppBinding | undefined {
   return window.go?.main?.App;
@@ -73,10 +85,25 @@ function detectHost(): Pick<DesktopDefaults, "hostOS" | "hostArch"> {
   return {hostOS: "darwin", hostArch: "arm64"};
 }
 
+function previewDesktopCopyPath(artifactPath: string): string {
+  const fileName = artifactPath.split(/[\\/]/).pop() || "GeneralsXZH-sfx";
+  const host = detectHost();
+  if (host.hostOS === "windows") {
+    return `C:\\Users\\Commander\\Desktop\\${fileName}`;
+  }
+  return host.hostOS === "linux"
+    ? `/home/commander/Desktop/${fileName}`
+    : `/Users/commander/Desktop/${fileName}`;
+}
+
 function mockDefaults(): DesktopDefaults {
   const host = detectHost();
   const windows = host.hostOS === "windows";
-  const home = windows ? "C:\\Users\\Commander" : "/Users/commander";
+  const home = windows
+    ? "C:\\Users\\Commander"
+    : host.hostOS === "linux"
+      ? "/home/commander"
+      : "/Users/commander";
   const target: BuildRequest["target"] =
     host.hostOS === "windows" ? "windows" : host.hostOS === "linux" ? "linux" : "macos";
   const outputName =
@@ -206,6 +233,9 @@ function scheduleMockBuild(jobId: string, request: BuildRequest): void {
     const timer = window.setTimeout(() => {
       emitMockLog({jobId, stream: "stdout", text: phase.log});
       const {log: _log, ...progress} = phase;
+      if (jobId === mockJobId && progress.status === "success" && !request.dryRun) {
+        mockArtifactVerified = true;
+      }
       emitMockProgress({jobId, ...progress});
     }, 500 + index * 700);
     mockTimers.push(timer);
@@ -260,8 +290,105 @@ export const desktopBackend = {
     clearMockTimers();
     mockPercent = 0;
     mockJobId = `preview-${Date.now()}`;
+    mockArtifactPath = request.output;
+    mockDryRun = request.dryRun;
+    mockArtifactVerified = false;
+    mockDesktopCopyPath = "";
+    mockCleanupPlanId = "";
+    mockCleanupCompleted = false;
+    mockCleanupInProgress = false;
     scheduleMockBuild(mockJobId, request);
     return mockJobId;
+  },
+
+  async copyBuildArtifactToDesktop(jobId: string): Promise<string> {
+    if (backendMode === "wails") {
+      return requireWailsApp().CopyBuildArtifactToDesktop(jobId);
+    }
+    if (backendMode === "unavailable") {
+      throw new Error(unavailableMessage);
+    }
+    if (
+      jobId !== mockJobId ||
+      mockDryRun ||
+      !mockArtifactPath ||
+      !mockArtifactVerified ||
+      mockCleanupCompleted ||
+      mockCleanupInProgress
+    ) {
+      throw new Error("No verified SFX artifact is available for this preview build.");
+    }
+    await new Promise((resolve) => window.setTimeout(resolve, 400));
+    mockDesktopCopyPath = previewDesktopCopyPath(mockArtifactPath);
+    return mockDesktopCopyPath;
+  },
+
+  // GeneralsX @feature Codex 05/08/2026 Preview the same explicit cleanup plan required by the native backend.
+  async getBuildCleanupPlan(jobId: string): Promise<BuildCleanupPlan> {
+    if (backendMode === "wails") {
+      return requireWailsApp().GetBuildCleanupPlan(jobId);
+    }
+    if (backendMode === "unavailable") {
+      throw new Error(unavailableMessage);
+    }
+    if (
+      jobId !== mockJobId ||
+      !mockArtifactVerified ||
+      !mockDesktopCopyPath ||
+      mockCleanupCompleted ||
+      mockCleanupInProgress
+    ) {
+      throw new Error("No copied SFX artifact is available for cleanup in this preview build.");
+    }
+    await new Promise((resolve) => window.setTimeout(resolve, 300));
+    if (
+      jobId !== mockJobId ||
+      !mockArtifactVerified ||
+      !mockDesktopCopyPath ||
+      mockCleanupCompleted ||
+      mockCleanupInProgress
+    ) {
+      throw new Error("No copied SFX artifact is available for cleanup in this preview build.");
+    }
+    mockCleanupPlanId = `${jobId}-cleanup-${++mockCleanupPlanSequence}`;
+    return {
+      jobId,
+      planId: mockCleanupPlanId,
+      desktopCopyPath: mockDesktopCopyPath,
+      entries: [{label: "Generated SFX artifact", path: mockArtifactPath}],
+    };
+  },
+
+  // GeneralsX @feature Codex 05/08/2026 Simulate cleanup without removing the preserved preview Desktop copy.
+  async cleanupBuild(jobId: string, planId: string): Promise<string> {
+    if (backendMode === "wails") {
+      return requireWailsApp().CleanupBuild(jobId, planId);
+    }
+    if (backendMode === "unavailable") {
+      throw new Error(unavailableMessage);
+    }
+    if (!planId || planId !== mockCleanupPlanId) {
+      throw new Error("The cleanup plan has expired or does not match this preview build. Review cleanup again.");
+    }
+    if (
+      jobId !== mockJobId ||
+      !mockArtifactVerified ||
+      !mockDesktopCopyPath ||
+      mockCleanupCompleted ||
+      mockCleanupInProgress
+    ) {
+      throw new Error("No copied SFX artifact is available for cleanup in this preview build.");
+    }
+    mockCleanupInProgress = true;
+    mockCleanupPlanId = "";
+    try {
+      await new Promise((resolve) => window.setTimeout(resolve, 500));
+      mockCleanupCompleted = true;
+      mockArtifactVerified = false;
+      return "Removed the generated SFX artifact from the preview build workspace.";
+    } finally {
+      mockCleanupInProgress = false;
+    }
   },
 
   async cancelBuild(): Promise<boolean> {
@@ -275,6 +402,11 @@ export const desktopBackend = {
       return false;
     }
     clearMockTimers();
+    mockArtifactVerified = false;
+    mockDesktopCopyPath = "";
+    mockCleanupPlanId = "";
+    mockCleanupCompleted = false;
+    mockCleanupInProgress = false;
     emitMockLog({jobId: mockJobId, stream: "stderr", text: "Preview build cancelled by the user."});
     emitMockProgress({
       jobId: mockJobId,

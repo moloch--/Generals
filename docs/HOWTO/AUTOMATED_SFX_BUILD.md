@@ -2,10 +2,12 @@
 
 ## Desktop app (preferred)
 
-Download the Automated Build Tool archive for your host from a tagged
-[`vX.Y.Z` release](https://github.com/moloch--/Generals/releases), extract it,
-and open the desktop application normally. The native macOS/ARM64,
-Linux/AMD64, and Windows/AMD64 builds present the same guided flow:
+Download the Automated Build Tool desktop asset for your host from a tagged
+[`vX.Y.Z` release](https://github.com/moloch--/Generals/releases). Use the
+macOS/ARM64 DMG, the direct Linux/AMD64 desktop executable, or the direct
+Windows/AMD64 desktop `.exe`. After downloading a direct macOS or Linux
+executable, run `chmod +x PATH` before starting it. The three desktop builds
+present the same guided flow:
 
 1. choose a target supported by this build host;
 2. select an existing source checkout or automatic clone destination;
@@ -16,6 +18,35 @@ Linux/AMD64, and Windows/AMD64 builds present the same guided flow:
 The app validates each step before it starts and shows the shared builder's
 real phase, terminal output, cancellation state, and final artifact path. It
 does not contain game data.
+
+After a real build completes, select **Copy to Desktop** to publish the raw SFX
+through a temporary sibling without overwriting an existing Desktop file. Once
+that copy succeeds, **Cleanup** becomes available. Cleanup first presents every
+path authorized for deletion in a destructive confirmation dialog. The
+confirmation is bound to that exact one-time plan; reviewing a new plan,
+starting another build, or changing the copied SFX invalidates stale
+authorization.
+
+Cleanup claims only destinations that did not exist when that specific build
+started and that still carry the same build's private ownership receipt. This
+can include an automatically cloned GeneralsX checkout, a newly created builder
+cache or managed Git checkout, a newly created target build directory, the raw
+output and macOS app bundle, stage manifests, portable bundle intermediates,
+and build logs. Descendants collapse under an owned parent so the dialog stays
+readable. Existing repositories, existing cache roots and their pre-existing
+contents, explicit or adjacent server sources, retail assets, installed SDKs
+and package-manager state, Docker images, and the Desktop SFX are never inferred
+as disposable.
+
+Immediately before deletion, the app hashes and reopens the Desktop copy, runs
+the SFX's full `--sfx-verify`, then hashes it again. A Linux/AMD64 SFX produced
+on macOS is verified in the already-required Linux builder container with no
+network and a read-only container filesystem. Every cleanup candidate is
+content-fingerprinted again, moved to a same-parent quarantine name through a
+root-scoped filesystem handle, and removed only if its identity, ownership
+marker, contents, and protected-path boundaries remain unchanged. Cancellation
+stops between owned roots, and any untouched roots remain eligible for a newly
+reviewed retry.
 
 When SteamCMD needs to download files, the desktop app opens it in a real native
 terminal and waits for it to finish. Enter the Steam password and Steam Guard
@@ -28,9 +59,11 @@ installation, and Linux package-manager commands that need administrator
 approval open in a native terminal and return control to the same GUI build.
 Noninteractive dependency commands continue to stream their output in the app.
 
-Each release archive also contains a dependency-light headless companion. The
-desktop executable itself accepts `--headless` and the same flags when started
-from a terminal.
+Each release attaches a dependency-light `generalsx-build` headless companion
+as a separate platform download. The desktop executable itself also accepts
+`--headless` and the same flags when started from a terminal. Check any download
+against the separately attached `SHA256SUMS`; `LICENSE.md` and
+`THIRD_PARTY_NOTICES.md` are independent release assets too.
 
 ### Build the desktop tool from source
 

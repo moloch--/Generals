@@ -15,11 +15,23 @@ Zero Hour that you legally own, such as the
 ## Preferred: use the Automated Build Tool
 
 The preferred build path is the GeneralsX **Automated Build Tool**. Tagged
-[`vX.Y.Z` releases](https://github.com/moloch--/Generals/releases) provide a
-native desktop app for Apple Silicon macOS, AMD64 Linux, and AMD64 Windows.
+[`vX.Y.Z` releases](https://github.com/moloch--/Generals/releases) provide the
+native desktop app and headless tool as separate downloads for Apple Silicon
+macOS, AMD64 Linux, and AMD64 Windows. The macOS desktop app uses a DMG so its
+`.app` bundle stays intact; Linux and Windows executables are attached directly.
 Open it normally for a guided four-step build: choose the host-supported target,
 select or download your owned game files, configure the output, and review the
 plan before anything changes.
+
+After a real build succeeds, **Copy to Desktop** publishes a verified SFX
+without overwriting an existing file. An optional **Cleanup** action then shows
+the exact builder-owned paths it can remove and requires explicit confirmation.
+Cleanup is limited to files and directories that were absent before that build,
+such as an automatic source clone, managed caches, target build output, and
+packaging intermediates. Existing checkouts, existing caches, retail assets,
+global tools, and the verified Desktop copy are preserved. The app revalidates
+the Desktop SFX immediately before cleanup; a Linux SFX built on macOS is
+verified inside the existing Linux builder container.
 
 If the selected game files need to be downloaded, the app opens SteamCMD in a
 real terminal. SteamCMD prompts there for the password and Steam Guard
@@ -71,7 +83,8 @@ runtime libraries, and the retail data; the launcher still uses normal
 operating-system libraries, and the C++ child uses target-native dynamic
 platform libraries. “Single file” describes the distributed SFX, not a fully
 static game process. The desktop build tool itself uses the host's native web
-view; release archives also include the dependency-light headless companion.
+view. Releases attach the dependency-light headless companion independently;
+direct macOS and Linux executable downloads need `chmod +x` before launch.
 Windows headless startup reaches Direct3D, but rendered gameplay remains
 exploratory.
 See the [automated SFX build guide](docs/HOWTO/AUTOMATED_SFX_BUILD.md) for
