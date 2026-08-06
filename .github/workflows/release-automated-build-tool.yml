@@ -14,9 +14,17 @@ on:
       - 'tools/generalsx-build-desktop/**'
       - '.github/workflows/release-automated-build-tool.yml'
   workflow_dispatch:
+    inputs:
+      # GeneralsX @build Codex 06/08/2026 Allow a trusted manual dispatch to recover a delayed tagged release without moving the tag.
+      release_tag:
+        description: 'Existing vX.Y.Z tag to build and publish; leave blank for a snapshot'
+        required: false
+        type: string
+        default: ''
 
 concurrency:
-  group: automated-build-tool-release-${{ github.ref }}
+  # GeneralsX @build Codex 06/08/2026 Serialize manual recovery with the matching tag-push release lane.
+  group: automated-build-tool-release-${{ github.event_name == 'workflow_dispatch' && inputs.release_tag != '' && format('refs/tags/{0}', inputs.release_tag) || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
@@ -40,6 +48,7 @@ jobs:
       product_version: ${{ steps.identity.outputs.product_version }}
       release_version: ${{ steps.identity.outputs.release_version }}
       source_commit: ${{ steps.identity.outputs.source_commit }}
+      publish_release: ${{ steps.identity.outputs.publish_release }}
     steps:
       # GeneralsX @build Codex 05/08/2026 Build versioned desktop and headless tools only from exact vX.Y.Z tags.
       - name: Checkout repository
@@ -47,6 +56,7 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag != '' && format('refs/tags/{0}', inputs.release_tag) || '' }}
 
       - name: Resolve source and release identity
         id: identity
@@ -54,22 +64,32 @@ jobs:
         env:
           EVENT_NAME: ${{ github.event_name }}
           REF_NAME: ${{ github.ref_name }}
+          MANUAL_RELEASE_TAG: ${{ inputs.release_tag }}
         run: |
           set -euo pipefail
 
           source_commit="$(git rev-parse 'HEAD^{commit}')"
+          release_tag=''
           if [[ "${EVENT_NAME}" == 'push' ]]; then
-            if [[ ! "${REF_NAME}" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
-              echo "::error::Tag '${REF_NAME}' must match vX.Y.Z without leading zeroes."
+            release_tag="${REF_NAME}"
+          elif [[ "${EVENT_NAME}" == 'workflow_dispatch' && -n "${MANUAL_RELEASE_TAG}" ]]; then
+            release_tag="${MANUAL_RELEASE_TAG}"
+          fi
+
+          publish_release='false'
+          if [[ -n "${release_tag}" ]]; then
+            if [[ ! "${release_tag}" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+              echo "::error::Tag '${release_tag}' must match vX.Y.Z without leading zeroes."
               exit 1
             fi
-            tag_commit="$(git rev-parse "refs/tags/${REF_NAME}^{commit}")"
+            tag_commit="$(git rev-parse --verify "refs/tags/${release_tag}^{commit}")"
             if [[ "${tag_commit}" != "${source_commit}" ]]; then
-              echo "::error::Checked-out commit does not match ${REF_NAME}."
+              echo "::error::Checked-out commit does not match ${release_tag}."
               exit 1
             fi
-            release_version="${REF_NAME}"
-            product_version="${REF_NAME#v}"
+            release_version="${release_tag}"
+            product_version="${release_tag#v}"
+            publish_release='true'
           else
             release_version="snapshot-${GITHUB_SHA:0:12}"
             product_version='0.0.0'
@@ -78,6 +98,7 @@ jobs:
           echo "product_version=${product_version}" >> "${GITHUB_OUTPUT}"
           echo "release_version=${release_version}" >> "${GITHUB_OUTPUT}"
           echo "source_commit=${source_commit}" >> "${GITHUB_OUTPUT}"
+          echo "publish_release=${publish_release}" >> "${GITHUB_OUTPUT}"
 
       - name: Set up Go
         uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16
@@ -173,6 +194,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && needs.verify-source.outputs.publish_release == 'true' && needs.verify-source.outputs.source_commit || '' }}
           persist-credentials: false
 
       - name: Set up Node.js
@@ -268,6 +290,7 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+          ref: ${{ github.event_name == 'workflow_dispatch' && needs.verify-source.outputs.publish_release == 'true' && needs.verify-source.outputs.source_commit || '' }}
 
       - name: Set up Go
         uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16
@@ -708,7 +731,7 @@ jobs:
 
   release:
     name: Publish verified GitHub release
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+    if: needs.verify-source.outputs.publish_release == 'true'
     needs: [verify-source, build-native]
     runs-on: ubuntu-24.04
     timeout-minutes: 15
@@ -720,6 +743,7 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+          ref: ${{ github.event_name == 'workflow_dispatch' && needs.verify-source.outputs.publish_release == 'true' && needs.verify-source.outputs.source_commit || '' }}
 
       - name: Download native release assets
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
