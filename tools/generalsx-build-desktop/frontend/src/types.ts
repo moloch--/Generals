@@ -65,6 +65,19 @@ export interface BuildLogEvent {
   text: string;
 }
 
+export type CopyProgressStatus = "running" | "success" | "error" | "cancelled";
+
+export interface CopyProgressEvent {
+  jobId: string;
+  operationId: string;
+  phase: "preparing" | "copying" | "verifying" | "publishing" | "complete";
+  status: CopyProgressStatus;
+  message: string;
+  bytesCopied: number;
+  totalBytes: number;
+  percent: number;
+}
+
 // GeneralsX @feature Codex 05/08/2026 Describe the exact completed-build paths authorized for cleanup.
 export interface BuildCleanupEntry {
   label: string;

@@ -5,9 +5,10 @@ import {Chip} from "@heroui/react/chip";
 import {Label} from "@heroui/react/label";
 import {ProgressBar} from "@heroui/react/progress-bar";
 import {ScrollShadow} from "@heroui/react/scroll-shadow";
-import {useLayoutEffect, useRef, useState} from "react";
+import {useEffect, useLayoutEffect, useRef, useState} from "react";
 
 import {CleanupBuildDialog} from "./CleanupBuildDialog";
+import {CopyBuildDialog} from "./CopyBuildDialog";
 import {
   canDismissCleanup,
   idleCleanupFeedback,
@@ -15,7 +16,12 @@ import {
   runBuildCleanup,
 } from "../lib/cleanupFeedback";
 import type {CleanupFeedback} from "../lib/cleanupFeedback";
-import {idleCopyFeedback, runDesktopCopy} from "../lib/copyFeedback";
+import {
+  createCopyOperationId,
+  idleCopyFeedback,
+  reduceDesktopCopyProgress,
+  runDesktopCopy,
+} from "../lib/copyFeedback";
 import type {CopyFeedback} from "../lib/copyFeedback";
 import {
   DEFAULT_FOLLOW_LOG_TAIL,
@@ -24,7 +30,13 @@ import {
 } from "../lib/logScroll";
 import {selectPostBuildActions} from "../lib/postBuildActions";
 import {formatPhase} from "../lib/request";
-import type {BuildCleanupPlan, BuildLogEvent, BuildProgressEvent, ExecutionState} from "../types";
+import type {
+  BuildCleanupPlan,
+  BuildLogEvent,
+  BuildProgressEvent,
+  CopyProgressEvent,
+  ExecutionState,
+} from "../types";
 
 interface BuildStatusProps {
   state: ExecutionState;
@@ -32,10 +44,12 @@ interface BuildStatusProps {
   logs: BuildLogEvent[];
   error: string;
   artifactPath: string;
+  jobId: string;
   dryRun: boolean;
   onCancel: () => void;
   onCleanup: (planId: string) => Promise<string>;
-  onCopyToDesktop: () => Promise<string>;
+  onCopyProgress: (listener: (event: CopyProgressEvent) => void) => () => void;
+  onCopyToDesktop: (operationId: string) => Promise<string>;
   onGetCleanupPlan: () => Promise<BuildCleanupPlan>;
   onReset: () => void;
 }
@@ -62,14 +76,17 @@ export function BuildStatus({
   logs,
   error,
   artifactPath,
+  jobId,
   dryRun,
   onCancel,
   onCleanup,
+  onCopyProgress,
   onCopyToDesktop,
   onGetCleanupPlan,
   onReset,
 }: BuildStatusProps) {
   const [copyFeedback, setCopyFeedback] = useState<CopyFeedback>(idleCopyFeedback);
+  const [isCopyDialogOpen, setIsCopyDialogOpen] = useState(false);
   const [cleanupFeedback, setCleanupFeedback] = useState<CleanupFeedback>(idleCleanupFeedback);
   const [isCleanupDialogOpen, setIsCleanupDialogOpen] = useState(false);
   const logViewportRef = useRef<HTMLDivElement>(null);
@@ -88,6 +105,10 @@ export function BuildStatus({
       scrollLogToTail(viewport, followLogTailRef.current);
     }
   }, [logs]);
+
+  useEffect(() => onCopyProgress((event) => {
+    setCopyFeedback((current) => reduceDesktopCopyProgress(current, event));
+  }), [onCopyProgress]);
 
   if (state === "idle") {
     return null;
@@ -130,6 +151,27 @@ export function BuildStatus({
     }
     await runBuildCleanup(() => onCleanup(plan.planId), plan, setCleanupFeedback);
     setIsCleanupDialogOpen(false);
+  };
+
+  const startDesktopCopy = () => {
+    const operationId = createCopyOperationId();
+    setIsCopyDialogOpen(true);
+    void runDesktopCopy(
+      jobId,
+      operationId,
+      () => onCopyToDesktop(operationId),
+      setCopyFeedback,
+    );
+  };
+
+  const changeCopyDialogOpen = (open: boolean) => {
+    if (copyFeedback.status === "pending") {
+      return;
+    }
+    setIsCopyDialogOpen(open);
+    if (!open && copyFeedback.status === "error") {
+      setCopyFeedback(idleCopyFeedback);
+    }
   };
 
   return (
@@ -189,16 +231,6 @@ export function BuildStatus({
                     ? copyFeedback.message
                     : artifactPath}
               </Alert.Description>
-            </Alert.Content>
-          </Alert>
-        ) : null}
-
-        {copyFeedback.status === "error" ? (
-          <Alert role="alert" status="danger">
-            <Alert.Indicator />
-            <Alert.Content>
-              <Alert.Title>Could not copy to Desktop</Alert.Title>
-              <Alert.Description>{copyFeedback.message}</Alert.Description>
             </Alert.Content>
           </Alert>
         ) : null}
@@ -299,18 +331,14 @@ export function BuildStatus({
               />
             ) : null}
             {postBuildActions.showCopy ? (
-              <Button
-                className="min-w-44"
+              <CopyBuildDialog
+                feedback={copyFeedback}
                 isDisabled={postBuildActions.copyDisabled}
-                isPending={copyFeedback.status === "pending"}
-                onPress={() => void runDesktopCopy(onCopyToDesktop, setCopyFeedback)}
-              >
-                {copyFeedback.status === "pending"
-                  ? "Copying…"
-                  : copyFeedback.status === "copied"
-                    ? "Copied to Desktop"
-                    : "Copy to Desktop"}
-              </Button>
+                isOpen={isCopyDialogOpen}
+                onOpen={startDesktopCopy}
+                onOpenChange={changeCopyDialogOpen}
+                onRetry={startDesktopCopy}
+              />
             ) : null}
           </>
         )}

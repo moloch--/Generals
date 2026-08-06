@@ -28,6 +28,12 @@ func TestCleanupBuildRequiresCopyAndConsumesExactReviewedPlan(t *testing.T) {
 		t.Fatal(err)
 	}
 	recorder.waitForProgress(t, "success")
+	app.mu.Lock()
+	missingReceipt := app.cleanupReceipt == nil
+	app.mu.Unlock()
+	if missingReceipt {
+		t.Fatalf("successful build has no cleanup receipt; events = %#v", recorder.snapshot())
+	}
 	if _, err := app.GetBuildCleanupPlan(jobID); err == nil || !strings.Contains(err.Error(), "copy") {
 		t.Fatalf("cleanup plan before Desktop copy error = %v", err)
 	}
@@ -193,7 +199,7 @@ func TestShutdownCancelsAndWaitsForBuildCleanup(t *testing.T) {
 	}
 }
 
-func TestShutdownDiscardsCleanupMarkersWithoutDeletingBuildFiles(t *testing.T) {
+func TestShutdownRetainsPersistentCleanupOwnershipWithoutDeletingBuildFiles(t *testing.T) {
 	app, request, dependencies, recorder, _ := cleanupAppFixture(t)
 	app.dependencies = *dependencies
 	if _, err := app.StartBuild(request); err != nil {
@@ -207,14 +213,19 @@ func TestShutdownDiscardsCleanupMarkersWithoutDeletingBuildFiles(t *testing.T) {
 		t.Fatal("successful build did not record cleanup markers")
 	}
 	markerPaths := make([]string, 0, len(receipt.candidates))
+	markerContents := make(map[string][]byte, len(receipt.candidates))
 	for _, candidate := range receipt.candidates {
 		markerPaths = append(markerPaths, candidate.markerPath)
+		markerContents[candidate.markerPath] = append([]byte(nil), candidate.markerContents...)
 	}
 	if app.beforeClose(context.Background()) {
 		t.Fatal("beforeClose prevented shutdown")
 	}
 	for _, marker := range markerPaths {
-		cleanupAssertNotExist(t, marker)
+		cleanupAssertFileContents(t, marker, markerContents[marker])
+	}
+	if _, err := os.Stat(receipt.ownershipLedgerPath); err != nil {
+		t.Fatalf("persistent cleanup ownership ledger was removed: %v", err)
 	}
 	if _, err := os.Stat(request.RepoRoot); err != nil {
 		t.Fatalf("shutdown removed source files: %v", err)

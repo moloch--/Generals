@@ -111,6 +111,82 @@ func TestParseFlagsAcceptsOnlineServerEntrypoint(t *testing.T) {
 	}
 }
 
+// GeneralsX @test Codex 05/08/2026 Keep source-byte updates useful without flooding Build Activity.
+func TestXZProgressReporterThrottlesAndSeparatesFinalization(t *testing.T) {
+	var output bytes.Buffer
+	now := time.Unix(1_700_000_000, 0)
+	reporter := newXZProgressReporter(&output)
+	reporter.now = func() time.Time { return now }
+
+	reporter.Report(bundle.PackProgress{TotalBytes: 4096})
+	now = now.Add(time.Second)
+	reporter.Report(bundle.PackProgress{CompletedBytes: 1024, TotalBytes: 4096})
+	now = now.Add(time.Second)
+	reporter.Report(bundle.PackProgress{CompletedBytes: 2048, TotalBytes: 4096})
+	now = now.Add(100 * time.Millisecond)
+	reporter.Report(bundle.PackProgress{CompletedBytes: 4096, TotalBytes: 4096})
+	reporter.Report(bundle.PackProgress{CompletedBytes: 4096, TotalBytes: 4096, Complete: true})
+	reporter.CompressionComplete(4096, 1024)
+
+	progressOutput := output.String()
+	for _, expected := range []string{
+		"XZ progress: 0 B of 4.00 KiB source bytes (0%).",
+		"XZ progress: 2.00 KiB of 4.00 KiB source bytes (50%).",
+		"XZ progress: 4.00 KiB of 4.00 KiB source bytes (100%).",
+		"XZ input complete at 4.00 KiB of 4.00 KiB source bytes; finalizing the compressed stream.",
+		"XZ compression complete: 4.00 KiB source bytes -> 1.00 KiB compressed.",
+	} {
+		if !strings.Contains(progressOutput, expected) {
+			t.Errorf("progress output missing %q:\n%s", expected, progressOutput)
+		}
+	}
+	if strings.Contains(progressOutput, "1.00 KiB of 4.00 KiB source bytes (25%).") {
+		t.Fatalf("sub-interval progress was not throttled:\n%s", progressOutput)
+	}
+	ordered := []string{
+		"(0%).",
+		"(50%).",
+		"(100%).",
+		"XZ input complete",
+		"XZ compression complete",
+	}
+	previous := -1
+	for _, text := range ordered {
+		index := strings.Index(progressOutput, text)
+		if index <= previous {
+			t.Fatalf("progress messages are out of order at %q:\n%s", text, progressOutput)
+		}
+		previous = index
+	}
+}
+
+func TestXZProgressReporterExplainsCancellationAndEarlyFailure(t *testing.T) {
+	t.Run("cancelled with byte position", func(t *testing.T) {
+		var output bytes.Buffer
+		reporter := newXZProgressReporter(&output)
+		reporter.Report(bundle.PackProgress{TotalBytes: 4096})
+		reporter.Report(bundle.PackProgress{CompletedBytes: 1024, TotalBytes: 4096})
+		reporter.Stopped(context.Canceled)
+
+		text := output.String()
+		if !strings.Contains(text, "XZ compression cancelled after 1.00 KiB of 4.00 KiB source bytes; no payload was published.") {
+			t.Fatalf("unexpected cancellation output:\n%s", text)
+		}
+		if strings.Contains(text, "XZ input complete") || strings.Contains(text, "XZ compression complete") {
+			t.Fatalf("cancelled compression claimed completion:\n%s", text)
+		}
+	})
+
+	t.Run("failed before scan", func(t *testing.T) {
+		var output bytes.Buffer
+		reporter := newXZProgressReporter(&output)
+		reporter.Stopped(errors.New("fixture failure"))
+		if got := strings.TrimSpace(output.String()); got != "GeneralsX SFX pack: XZ compression stopped before source-byte progress was available; no payload was published." {
+			t.Fatalf("early failure output = %q", got)
+		}
+	})
+}
+
 func TestSyncRegularFileUsesWritableWindowsHandle(t *testing.T) {
 	if got := syncRegularFileOpenFlags("windows"); got != os.O_RDWR {
 		t.Fatalf("Windows sync open flags = %#x, want O_RDWR", got)
@@ -579,12 +655,25 @@ func TestRunBuildsRealPackedLauncherWithoutTouchingModule(t *testing.T) {
 		t.Fatalf("packer stdout = %q, want %q", got, canonicalOutputPath)
 	}
 	progressOutput := stderr.String()
-	xzNotice := "XZ compression can take several minutes and may be quiet while it runs."
+	xzNotice := "Starting XZ compression. This can take several minutes; source-byte progress will be reported below."
 	if !strings.Contains(progressOutput, "packing ") || !strings.Contains(progressOutput, "linking launcher") || !strings.Contains(progressOutput, xzNotice) {
 		t.Fatalf("packer progress output is incomplete: %q", stderr.String())
 	}
-	if noticeIndex, linkIndex := strings.Index(progressOutput, xzNotice), strings.Index(progressOutput, "linking launcher"); noticeIndex < 0 || linkIndex < 0 || noticeIndex >= linkIndex {
-		t.Fatalf("XZ duration notice was not emitted before linking: %q", progressOutput)
+	orderedProgress := []string{
+		xzNotice,
+		"XZ progress: 0 B of ",
+		"source bytes (100%).",
+		"XZ input complete at ",
+		"XZ compression complete:",
+		"linking launcher",
+	}
+	previousProgressIndex := -1
+	for _, message := range orderedProgress {
+		index := strings.Index(progressOutput, message)
+		if index <= previousProgressIndex {
+			t.Fatalf("XZ progress message %q was absent or out of order: %q", message, progressOutput)
+		}
+		previousProgressIndex = index
 	}
 
 	cacheRoot, launcherEnvironment := packedLauncherTestCache(root, runtime.GOOS)
@@ -702,6 +791,46 @@ func TestWriteCompressedPayloadHonorsCanceledContext(t *testing.T) {
 		t.Fatalf("writeCompressedPayload error = %v, want context.Canceled", err)
 	}
 	assertNotExist(t, output)
+}
+
+// GeneralsX @test Codex 05/08/2026 Remove partial XZ output and avoid false finalization when cancellation interrupts progress.
+func TestWriteCompressedPayloadCancellationStopsProgressBeforeCompletion(t *testing.T) {
+	source := createPayloadFixture(t)
+	output := filepath.Join(t.TempDir(), "payload.tar.xz")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var progressOutput bytes.Buffer
+	reporter := newXZProgressReporter(&progressOutput)
+	options := fixturePackOptions(runtime.GOOS, runtime.GOARCH)
+	options.Context = ctx
+	options.Progress = func(progress bundle.PackProgress) {
+		reporter.Report(progress)
+		if progress.CompletedBytes > 0 {
+			cancel()
+		}
+	}
+
+	_, _, _, err := writeCompressedPayload(
+		ctx,
+		source,
+		output,
+		options,
+		1<<20,
+		"",
+	)
+	reporter.Stopped(err)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("writeCompressedPayload error = %v, want context.Canceled", err)
+	}
+	assertNotExist(t, output)
+	text := progressOutput.String()
+	if !strings.Contains(text, "XZ compression cancelled after ") ||
+		!strings.Contains(text, "source bytes; no payload was published.") {
+		t.Fatalf("cancellation progress is incomplete:\n%s", text)
+	}
+	if strings.Contains(text, "XZ input complete") || strings.Contains(text, "XZ compression complete") {
+		t.Fatalf("cancelled progress claimed completion:\n%s", text)
+	}
 }
 
 func createPayloadFixture(t *testing.T) string {

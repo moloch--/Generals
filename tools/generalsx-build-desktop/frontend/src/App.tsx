@@ -311,12 +311,14 @@ export function App() {
                   artifactPath={primaryArtifactPath(request, hostOS)}
                   dryRun={request.dryRun}
                   error={executionError}
+                  jobId={activeJobRef.current}
                   logs={logs}
                   progress={progress}
                   state={execution}
                   onCancel={() => void cancelBuild()}
                   onCleanup={(planId) => desktopBackend.cleanupBuild(activeJobRef.current, planId)}
-                  onCopyToDesktop={() => desktopBackend.copyBuildArtifactToDesktop(activeJobRef.current)}
+                  onCopyProgress={desktopBackend.onCopyProgress}
+                  onCopyToDesktop={(operationId) => desktopBackend.copyBuildArtifactToDesktop(activeJobRef.current, operationId)}
                   onGetCleanupPlan={() => desktopBackend.getBuildCleanupPlan(activeJobRef.current)}
                   onReset={resetExecution}
                 />

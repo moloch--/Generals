@@ -15,7 +15,13 @@ import (
 )
 
 type bundleFingerprintBuilder struct {
-	hash hash.Hash
+	hash       hash.Hash
+	totalBytes int64
+}
+
+type bundleFingerprint struct {
+	digest     [sha256.Size]byte
+	totalBytes int64
 }
 
 func newBundleFingerprintBuilder() *bundleFingerprintBuilder {
@@ -28,14 +34,17 @@ func (builder *bundleFingerprintBuilder) add(relative string, info fs.FileInfo) 
 	if info.IsDir() {
 		kind = 'd'
 		size = 0
+	} else {
+		builder.totalBytes += size
 	}
 	fmt.Fprintf(builder.hash, "%c\x00%d:%s\x00%d\x00%d\x00", kind, len(relative), relative, uint32(info.Mode().Perm()), size)
 }
 
-func (builder *bundleFingerprintBuilder) result() [sha256.Size]byte {
-	var digest [sha256.Size]byte
-	copy(digest[:], builder.hash.Sum(nil))
-	return digest
+func (builder *bundleFingerprintBuilder) result() bundleFingerprint {
+	var result bundleFingerprint
+	copy(result.digest[:], builder.hash.Sum(nil))
+	result.totalBytes = builder.totalBytes
+	return result
 }
 
 func validateBundleArtifactRoot(path string, info fs.FileInfo) error {
@@ -59,8 +68,8 @@ func validateBundleEntry(relative string, info fs.FileInfo) error {
 }
 
 // GeneralsX @feature Codex 05/08/2026 Fingerprint the complete app without following links outside its rooted tree.
-func hashStableBundleArtifact(ctx context.Context, path string, recorded fs.FileInfo) ([sha256.Size]byte, error) {
-	var empty [sha256.Size]byte
+func hashStableBundleArtifact(ctx context.Context, path string, recorded fs.FileInfo) (bundleFingerprint, error) {
+	var empty bundleFingerprint
 	if err := ctx.Err(); err != nil {
 		return empty, err
 	}
@@ -198,6 +207,8 @@ func copyCompletedBundleToDirectory(
 	exactDestination := filepath.Join(destinationDirectory, baseName)
 	if destinationInfo, statErr := os.Lstat(exactDestination); statErr == nil &&
 		destinationInfo.Mode()&os.ModeSymlink == 0 && os.SameFile(current, destinationInfo) {
+		reportArtifactCopyStage(ctx, "copying", "Artifact is already on Desktop", completed.sourceBytes, completed.sourceBytes)
+		reportArtifactCopyStage(ctx, "verifying", "Verifying the Desktop application", completed.sourceBytes, completed.sourceBytes)
 		if err := verifyArtifactBeforePublication(ctx, completed, exactDestination, verifyArtifact); err != nil {
 			return "", err
 		}
@@ -222,12 +233,14 @@ func copyCompletedBundleToDirectory(
 	if err != nil {
 		return "", err
 	}
-	if copiedDigest != completed.sourceSHA256 {
+	if copiedDigest.digest != completed.sourceSHA256 || copiedDigest.totalBytes != completed.sourceBytes {
 		return "", errors.New("source application bundle contents changed after the build completed")
 	}
+	reportArtifactCopyStage(ctx, "verifying", "Verifying the copied Desktop application", completed.sourceBytes, completed.sourceBytes)
 	if err := verifyArtifactBeforePublication(ctx, completed, temporaryPath, verifyArtifact); err != nil {
 		return "", err
 	}
+	reportArtifactCopyStage(ctx, "publishing", "Publishing the verified application to Desktop", completed.sourceBytes, completed.sourceBytes)
 	for attempt := 0; attempt < desktopCopyNameAttempts; attempt++ {
 		if err := ctx.Err(); err != nil {
 			return "", err
@@ -243,8 +256,8 @@ func copyCompletedBundleToDirectory(
 	return "", fmt.Errorf("could not choose an unused application name after %d attempts", desktopCopyNameAttempts)
 }
 
-func copyBundleArtifact(ctx context.Context, completed *completedArtifact, destinationPath string) ([sha256.Size]byte, error) {
-	var empty [sha256.Size]byte
+func copyBundleArtifact(ctx context.Context, completed *completedArtifact, destinationPath string) (bundleFingerprint, error) {
+	var empty bundleFingerprint
 	sourceRoot, err := os.OpenRoot(completed.sourcePath)
 	if err != nil {
 		return empty, err
@@ -261,7 +274,11 @@ func copyBundleArtifact(ctx context.Context, completed *completedArtifact, desti
 	}
 	builder := newBundleFingerprintBuilder()
 	builder.add(".", sourceInfo)
-	if err := copyBundleDirectory(ctx, sourceRoot, destinationRoot, ".", sourceInfo, builder); err != nil {
+	counter := newArtifactCopyCounter(ctx, completed.sourceBytes)
+	if err := copyBundleDirectory(ctx, sourceRoot, destinationRoot, ".", sourceInfo, builder, counter); err != nil {
+		return empty, err
+	}
+	if err := counter.finish(); err != nil {
 		return empty, err
 	}
 	if err := destinationRoot.Chmod(".", sourceInfo.Mode().Perm()); err != nil {
@@ -277,7 +294,14 @@ func copyBundleArtifact(ctx context.Context, completed *completedArtifact, desti
 	return builder.result(), nil
 }
 
-func copyBundleDirectory(ctx context.Context, sourceRoot, destinationRoot *os.Root, relative string, expected fs.FileInfo, builder *bundleFingerprintBuilder) error {
+func copyBundleDirectory(
+	ctx context.Context,
+	sourceRoot, destinationRoot *os.Root,
+	relative string,
+	expected fs.FileInfo,
+	builder *bundleFingerprintBuilder,
+	counter *artifactCopyCounter,
+) error {
 	directory, err := sourceRoot.Open(relative)
 	if err != nil {
 		return err
@@ -308,7 +332,7 @@ func copyBundleDirectory(ctx context.Context, sourceRoot, destinationRoot *os.Ro
 			if err := destinationRoot.Mkdir(child, 0o700); err != nil {
 				return err
 			}
-			if err := copyBundleDirectory(ctx, sourceRoot, destinationRoot, child, info, builder); err != nil {
+			if err := copyBundleDirectory(ctx, sourceRoot, destinationRoot, child, info, builder, counter); err != nil {
 				return err
 			}
 			if err := destinationRoot.Chmod(child, info.Mode().Perm()); err != nil {
@@ -333,7 +357,7 @@ func copyBundleDirectory(ctx context.Context, sourceRoot, destinationRoot *os.Ro
 			source.Close()
 			return err
 		}
-		copied, copyErr := io.Copy(io.MultiWriter(destination, builder.hash), contextReader{ctx: ctx, reader: source})
+		copied, copyErr := io.Copy(counter.writer(io.MultiWriter(destination, builder.hash)), contextReader{ctx: ctx, reader: source})
 		afterSource, sourceStatErr := source.Stat()
 		sourceCloseErr := source.Close()
 		if copyErr == nil && copied != info.Size() {

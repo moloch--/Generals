@@ -60,6 +60,39 @@ func TestCopyCompletedMacOSAppPreservesBundleAndChoosesUnusedName(t *testing.T) 
 	assertNoBundleCopyTemporary(t, desktop)
 }
 
+func TestCopyCompletedMacOSAppReportsCumulativePayloadBytes(t *testing.T) {
+	t.Parallel()
+	source := filepath.Join(t.TempDir(), "GeneralsXZH.app")
+	writeArtifactBundleFixture(t, source)
+	completed, err := inspectCompletedArtifact("job-app-progress", source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if completed.sourceBytes <= 0 {
+		t.Fatalf("application payload bytes = %d", completed.sourceBytes)
+	}
+	var progress []artifactCopyProgress
+	ctx := withArtifactCopyProgress(context.Background(), func(event artifactCopyProgress) {
+		progress = append(progress, event)
+	})
+	if _, err := copyCompletedArtifactToDirectory(ctx, completed, t.TempDir(), nil); err != nil {
+		t.Fatal(err)
+	}
+	previousBytes := int64(0)
+	for _, event := range progress {
+		if event.totalBytes != completed.sourceBytes {
+			t.Fatalf("application copy total = %d, want %d", event.totalBytes, completed.sourceBytes)
+		}
+		if event.bytesCopied < previousBytes {
+			t.Fatalf("application byte progress regressed from %d to %d", previousBytes, event.bytesCopied)
+		}
+		previousBytes = event.bytesCopied
+	}
+	if len(progress) == 0 || progress[len(progress)-1].bytesCopied != completed.sourceBytes || progress[len(progress)-1].percent != 100 {
+		t.Fatalf("final application progress = %#v", progress)
+	}
+}
+
 func TestMacOSAppArtifactRejectsLinksAndDetectsNestedTampering(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("symlink creation may require Windows developer mode")

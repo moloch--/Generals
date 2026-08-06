@@ -176,6 +176,53 @@ func TestCopyCompletedArtifactCancellationRemovesPartialCopy(t *testing.T) {
 	}
 }
 
+func TestCopyCompletedArtifactReportsMonotonicByteProgress(t *testing.T) {
+	t.Parallel()
+	desktop := t.TempDir()
+	source := filepath.Join(t.TempDir(), "GeneralsXZH-sfx")
+	payload := bytes.Repeat([]byte("verified SFX progress fixture"), 64*1024)
+	if err := os.WriteFile(source, payload, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	completed, err := inspectCompletedArtifact("job-progress", source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var progress []artifactCopyProgress
+	ctx := withArtifactCopyProgress(context.Background(), func(event artifactCopyProgress) {
+		progress = append(progress, event)
+	})
+
+	if _, err := copyCompletedArtifactToDirectory(ctx, completed, desktop, nil); err != nil {
+		t.Fatal(err)
+	}
+	if len(progress) < 3 {
+		t.Fatalf("copy progress events = %#v, want copying and post-copy stages", progress)
+	}
+	previousBytes := int64(0)
+	previousPercent := 0
+	seenVerifying := false
+	seenPublishing := false
+	for _, event := range progress {
+		if event.bytesCopied < previousBytes || event.percent < previousPercent {
+			t.Fatalf("copy progress regressed from %d/%d to %d/%d", previousBytes, previousPercent, event.bytesCopied, event.percent)
+		}
+		if event.totalBytes != int64(len(payload)) {
+			t.Fatalf("copy total bytes = %d, want %d", event.totalBytes, len(payload))
+		}
+		previousBytes, previousPercent = event.bytesCopied, event.percent
+		seenVerifying = seenVerifying || event.phase == "verifying"
+		seenPublishing = seenPublishing || event.phase == "publishing"
+	}
+	last := progress[len(progress)-1]
+	if last.bytesCopied != int64(len(payload)) || last.percent != 100 {
+		t.Fatalf("final byte progress = %#v", last)
+	}
+	if !seenVerifying || !seenPublishing {
+		t.Fatalf("post-copy progress stages = verifying:%t publishing:%t", seenVerifying, seenPublishing)
+	}
+}
+
 func TestRevalidateCompletedArtifactRejectsInPlaceContentChangeWithRestoredMetadata(t *testing.T) {
 	t.Parallel()
 	source := filepath.Join(t.TempDir(), "GeneralsXZH-sfx")

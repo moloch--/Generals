@@ -13,13 +13,17 @@ import (
 	"strings"
 )
 
-const desktopCopyNameAttempts = 1000
+const (
+	desktopCopyNameAttempts    = 1000
+	copyOperationIDLengthLimit = 160
+)
 
 type completedArtifact struct {
 	jobID        string
 	target       string
 	sourcePath   string
 	sourceInfo   fs.FileInfo
+	sourceBytes  int64
 	sourceSHA256 [sha256.Size]byte
 }
 
@@ -36,12 +40,13 @@ func inspectCompletedArtifactContext(ctx context.Context, jobID, sourcePath stri
 		if err := validateBundleArtifactRoot(sourcePath, pathInfo); err != nil {
 			return nil, err
 		}
-		digest, err := hashStableBundleArtifact(ctx, sourcePath, pathInfo)
+		fingerprint, err := hashStableBundleArtifact(ctx, sourcePath, pathInfo)
 		if err != nil {
 			return nil, fmt.Errorf("hash source application bundle: %w", err)
 		}
 		return &completedArtifact{
-			jobID: jobID, sourcePath: sourcePath, sourceInfo: pathInfo, sourceSHA256: digest,
+			jobID: jobID, sourcePath: sourcePath, sourceInfo: pathInfo,
+			sourceBytes: fingerprint.totalBytes, sourceSHA256: fingerprint.digest,
 		}, nil
 	}
 	source, info, err := openStableArtifact(sourcePath)
@@ -54,7 +59,8 @@ func inspectCompletedArtifactContext(ctx context.Context, jobID, sourcePath stri
 		return nil, fmt.Errorf("hash source artifact: %w", err)
 	}
 	return &completedArtifact{
-		jobID: jobID, sourcePath: sourcePath, sourceInfo: info, sourceSHA256: digest,
+		jobID: jobID, sourcePath: sourcePath, sourceInfo: info,
+		sourceBytes: info.Size(), sourceSHA256: digest,
 	}, nil
 }
 
@@ -90,11 +96,12 @@ func revalidateCompletedArtifact(ctx context.Context, completed *completedArtifa
 		return err
 	}
 	if completed.sourceInfo.IsDir() {
-		digest, err := hashStableBundleArtifact(ctx, completed.sourcePath, completed.sourceInfo)
+		fingerprint, err := hashStableBundleArtifact(ctx, completed.sourcePath, completed.sourceInfo)
 		if err != nil {
 			return fmt.Errorf("hash recorded application bundle: %w", err)
 		}
-		if digest != completed.sourceSHA256 {
+		if fingerprint.digest != completed.sourceSHA256 ||
+			(completed.sourceBytes > 0 && fingerprint.totalBytes != completed.sourceBytes) {
 			return errors.New("application bundle contents changed after it was recorded")
 		}
 		return nil
@@ -176,11 +183,27 @@ func hashStableArtifact(
 	return digest, nil
 }
 
-// GeneralsX @feature Codex 05/08/2026 Copy only the verified SFX from the matching completed GUI build.
+// GeneralsX @feature Codex 05/08/2026 Preserve the original one-argument Desktop-copy binding for compatibility.
 func (a *App) CopyBuildArtifactToDesktop(jobID string) (string, error) {
+	return a.copyBuildArtifactToDesktop(jobID, generateJobID())
+}
+
+// GeneralsX @feature Codex 05/08/2026 Stream operation-scoped byte progress while preserving the synchronous copy result.
+func (a *App) CopyBuildArtifactToDesktopWithProgress(jobID, operationID string) (string, error) {
+	return a.copyBuildArtifactToDesktop(jobID, operationID)
+}
+
+func (a *App) copyBuildArtifactToDesktop(jobID, operationID string) (destination string, err error) {
 	jobID = strings.TrimSpace(jobID)
 	if jobID == "" {
 		return "", errors.New("build job ID is required")
+	}
+	operationID = strings.TrimSpace(operationID)
+	if operationID == "" {
+		return "", errors.New("Desktop copy operation ID is required")
+	}
+	if len(operationID) > copyOperationIDLengthLimit {
+		return "", fmt.Errorf("Desktop copy operation ID exceeds %d characters", copyOperationIDLengthLimit)
 	}
 
 	a.mu.Lock()
@@ -231,6 +254,7 @@ func (a *App) CopyBuildArtifactToDesktop(jobID string) (string, error) {
 	a.copyCancel = cancel
 	a.copyDone = done
 	a.mu.Unlock()
+	emitter := newCopyProgressEmitter(a, a.runtimeContext(), jobID, operationID)
 	defer func() {
 		cancel()
 		a.mu.Lock()
@@ -240,8 +264,10 @@ func (a *App) CopyBuildArtifactToDesktop(jobID string) (string, error) {
 			a.copyDone = nil
 		}
 		a.mu.Unlock()
+		emitter.finish(destination, err)
 		close(done)
 	}()
+	copyContext = withArtifactCopyProgress(copyContext, emitter.report)
 
 	desktop, err := desktopDirectory()
 	if err != nil {
@@ -250,7 +276,7 @@ func (a *App) CopyBuildArtifactToDesktop(jobID string) (string, error) {
 	if err := copyContext.Err(); err != nil {
 		return "", err
 	}
-	destination, err := copyArtifact(copyContext, completed, desktop, verifyArtifact)
+	destination, err = copyArtifact(copyContext, completed, desktop, verifyArtifact)
 	if err != nil {
 		return "", fmt.Errorf("copy build artifact to Desktop: %w", err)
 	}
@@ -262,7 +288,7 @@ func (a *App) CopyBuildArtifactToDesktop(jobID string) (string, error) {
 		return "", fmt.Errorf("inspect Desktop build artifact: %w", err)
 	}
 	desktopArtifact.target = completed.target
-	if desktopArtifact.sourceSHA256 != completed.sourceSHA256 {
+	if desktopArtifact.sourceSHA256 != completed.sourceSHA256 || desktopArtifact.sourceBytes != completed.sourceBytes {
 		return "", errors.New("Desktop copy does not match the completed build artifact")
 	}
 	a.mu.Lock()
@@ -330,6 +356,8 @@ func copyCompletedArtifactToDirectory(
 	exactDestination := filepath.Join(destinationDirectory, baseName)
 	if destinationInfo, statErr := os.Lstat(exactDestination); statErr == nil &&
 		destinationInfo.Mode()&os.ModeSymlink == 0 && os.SameFile(openedInfo, destinationInfo) {
+		reportArtifactCopyStage(ctx, "copying", "Artifact is already on Desktop", completed.sourceBytes, completed.sourceBytes)
+		reportArtifactCopyStage(ctx, "verifying", "Verifying the Desktop artifact", completed.sourceBytes, completed.sourceBytes)
 		if err := verifyArtifactBeforePublication(ctx, completed, exactDestination, verifyArtifact); err != nil {
 			return "", err
 		}
@@ -355,9 +383,11 @@ func copyCompletedArtifactToDirectory(
 	if err := writeTemporaryArtifact(ctx, source, completed, temporary); err != nil {
 		return "", err
 	}
+	reportArtifactCopyStage(ctx, "verifying", "Verifying the copied Desktop artifact", completed.sourceBytes, completed.sourceBytes)
 	if err := verifyArtifactBeforePublication(ctx, completed, temporaryPath, verifyArtifact); err != nil {
 		return "", err
 	}
+	reportArtifactCopyStage(ctx, "publishing", "Publishing the verified artifact to Desktop", completed.sourceBytes, completed.sourceBytes)
 	for attempt := 0; attempt < desktopCopyNameAttempts; attempt++ {
 		if err := ctx.Err(); err != nil {
 			return "", err
@@ -385,7 +415,7 @@ func verifyArtifactBeforePublication(
 		return fmt.Errorf("inspect temporary Desktop artifact: %w", err)
 	}
 	temporary.target = completed.target
-	if temporary.sourceSHA256 != completed.sourceSHA256 {
+	if temporary.sourceSHA256 != completed.sourceSHA256 || temporary.sourceBytes != completed.sourceBytes {
 		return errors.New("temporary Desktop artifact does not match the completed build")
 	}
 	if verifyArtifact == nil {
@@ -417,12 +447,16 @@ func writeTemporaryArtifact(ctx context.Context, source *os.File, completed *com
 	}()
 
 	hash := sha256.New()
-	copied, err := io.Copy(io.MultiWriter(destination, hash), contextReader{ctx: ctx, reader: source})
+	counter := newArtifactCopyCounter(ctx, completed.sourceBytes)
+	copied, err := io.Copy(counter.writer(io.MultiWriter(destination, hash)), contextReader{ctx: ctx, reader: source})
 	if err != nil {
 		return fmt.Errorf("write temporary Desktop copy: %w", err)
 	}
 	if copied != completed.sourceInfo.Size() {
 		return fmt.Errorf("copied %d bytes, expected %d", copied, completed.sourceInfo.Size())
+	}
+	if err := counter.finish(); err != nil {
+		return err
 	}
 	afterCopy, err := source.Stat()
 	if err != nil {

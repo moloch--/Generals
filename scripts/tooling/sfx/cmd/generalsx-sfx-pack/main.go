@@ -32,6 +32,7 @@ const (
 	defaultMaxEmbedBytes = int64(1_900_000_000)
 	launcherPackage      = "./cmd/generalsx-sfx"
 	generatedPayloadDir  = "internal/payload/generated"
+	xzProgressInterval   = 2 * time.Second
 )
 
 var errPayloadTooLarge = errors.New("compressed payload exceeds maximum embedded size")
@@ -67,6 +68,21 @@ type boundedDigestWriter struct {
 type cappedBuffer struct {
 	buffer bytes.Buffer
 	limit  int
+}
+
+// GeneralsX @feature Codex 05/08/2026 Throttle truthful source-byte XZ progress for terminal and GUI consumers.
+type xzProgressReporter struct {
+	writer              io.Writer
+	now                 func() time.Time
+	interval            time.Duration
+	started             bool
+	inputComplete       bool
+	completed           int64
+	total               int64
+	lastEmitted         int64
+	lastEmittedTotal    int64
+	lastEmittedComplete bool
+	lastEmission        time.Time
 }
 
 func main() {
@@ -209,8 +225,10 @@ func run(ctx context.Context, arguments []string, stdout, stderr io.Writer) erro
 		targetArch,
 		compressorDescription,
 	)
-	// GeneralsX @tweak Codex 05/08/2026 Explain the intentionally quiet, CPU-heavy compression phase before it starts.
-	_, _ = fmt.Fprintln(stderr, "XZ compression can take several minutes and may be quiet while it runs.")
+	// GeneralsX @tweak Codex 05/08/2026 Explain the CPU-heavy phase consistently on every supported platform.
+	_, _ = fmt.Fprintln(stderr, "GeneralsX SFX pack: Starting XZ compression. This can take several minutes; source-byte progress will be reported below.")
+	progressReporter := newXZProgressReporter(stderr)
+	packOptions.Progress = progressReporter.Report
 
 	payloadPath := filepath.Join(generatedDir, "payload.tar.xz")
 	manifest, payloadDigest, payloadSize, err := writeCompressedPayload(
@@ -222,8 +240,10 @@ func run(ctx context.Context, arguments []string, stdout, stderr io.Writer) erro
 		xzExecutable,
 	)
 	if err != nil {
+		progressReporter.Stopped(err)
 		return fmt.Errorf("generate compressed payload: %w", err)
 	}
+	progressReporter.CompressionComplete(manifest.TotalSize, payloadSize)
 	manifest.Compression = config.compression
 	manifest.PayloadSHA256 = payloadDigest
 	manifest.PayloadSize = payloadSize
@@ -252,6 +272,130 @@ func run(ctx context.Context, arguments []string, stdout, stderr io.Writer) erro
 
 	_, _ = fmt.Fprintln(stdout, outputPath)
 	return nil
+}
+
+func newXZProgressReporter(writer io.Writer) *xzProgressReporter {
+	if writer == nil {
+		writer = io.Discard
+	}
+	return &xzProgressReporter{
+		writer:   writer,
+		now:      time.Now,
+		interval: xzProgressInterval,
+	}
+}
+
+// Report receives the post-exclusion regular-file bytes accepted by the tar
+// stream. Reaching total input bytes deliberately does not claim compression
+// completion because compressor shutdown and payload synchronization remain.
+func (reporter *xzProgressReporter) Report(progress bundle.PackProgress) {
+	if reporter == nil || reporter.writer == nil {
+		return
+	}
+	now := reporter.now()
+	reporter.completed = progress.CompletedBytes
+	reporter.total = progress.TotalBytes
+	if !reporter.started {
+		reporter.started = true
+		reporter.emitProgress(now, progress.Complete)
+	} else if progress.Complete {
+		reporter.emitProgress(now, true)
+	} else if progress.CompletedBytes != reporter.lastEmitted &&
+		now.Sub(reporter.lastEmission) >= reporter.interval {
+		reporter.emitProgress(now, false)
+	}
+	if progress.Complete && !reporter.inputComplete {
+		reporter.inputComplete = true
+		_, _ = fmt.Fprintf(
+			reporter.writer,
+			"GeneralsX SFX pack: XZ input complete at %s of %s source bytes; finalizing the compressed stream. This can remain quiet for a while.\n",
+			formatByteCount(progress.CompletedBytes),
+			formatByteCount(progress.TotalBytes),
+		)
+	}
+}
+
+func (reporter *xzProgressReporter) emitProgress(now time.Time, complete bool) {
+	if reporter.lastEmitted == reporter.completed &&
+		reporter.lastEmittedTotal == reporter.total &&
+		reporter.lastEmittedComplete == complete &&
+		!reporter.lastEmission.IsZero() {
+		return
+	}
+	percent := 0
+	if reporter.total > 0 {
+		percent = int(reporter.completed * 100 / reporter.total)
+	} else if complete {
+		percent = 100
+	}
+	_, _ = fmt.Fprintf(
+		reporter.writer,
+		"GeneralsX SFX pack: XZ progress: %s of %s source bytes (%d%%).\n",
+		formatByteCount(reporter.completed),
+		formatByteCount(reporter.total),
+		percent,
+	)
+	reporter.lastEmitted = reporter.completed
+	reporter.lastEmittedTotal = reporter.total
+	reporter.lastEmittedComplete = complete
+	reporter.lastEmission = now
+}
+
+func (reporter *xzProgressReporter) CompressionComplete(sourceBytes, compressedBytes int64) {
+	if reporter == nil || reporter.writer == nil {
+		return
+	}
+	_, _ = fmt.Fprintf(
+		reporter.writer,
+		"GeneralsX SFX pack: XZ compression complete: %s source bytes -> %s compressed.\n",
+		formatByteCount(sourceBytes),
+		formatByteCount(compressedBytes),
+	)
+}
+
+func (reporter *xzProgressReporter) Stopped(err error) {
+	if reporter == nil || reporter.writer == nil {
+		return
+	}
+	action := "stopped"
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		action = "cancelled"
+	}
+	if !reporter.started {
+		_, _ = fmt.Fprintf(
+			reporter.writer,
+			"GeneralsX SFX pack: XZ compression %s before source-byte progress was available; no payload was published.\n",
+			action,
+		)
+		return
+	}
+	_, _ = fmt.Fprintf(
+		reporter.writer,
+		"GeneralsX SFX pack: XZ compression %s after %s of %s source bytes; no payload was published.\n",
+		action,
+		formatByteCount(reporter.completed),
+		formatByteCount(reporter.total),
+	)
+}
+
+func formatByteCount(bytes int64) string {
+	if bytes < 0 {
+		bytes = 0
+	}
+	if bytes < 1024 {
+		return fmt.Sprintf("%d B", bytes)
+	}
+	units := [...]string{"KiB", "MiB", "GiB", "TiB"}
+	value := float64(bytes)
+	unit := "B"
+	for _, candidate := range units {
+		value /= 1024
+		unit = candidate
+		if value < 1024 {
+			break
+		}
+	}
+	return fmt.Sprintf("%.2f %s", value, unit)
 }
 
 func parseFlags(arguments []string, stderr io.Writer) (packConfig, error) {

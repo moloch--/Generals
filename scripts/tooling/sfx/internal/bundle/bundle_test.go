@@ -80,6 +80,90 @@ func TestWriteTarDeterministicRoundTrip(t *testing.T) {
 	assertFile(t, filepath.Join(destination, "empty"), "", 0o600)
 }
 
+// GeneralsX @test Codex 05/08/2026 Keep XZ-facing source progress exact, monotonic, and output-neutral.
+func TestWriteTarReportsPostExclusionSourceBytes(t *testing.T) {
+	source := t.TempDir()
+	mustMkdir(t, filepath.Join(source, "data"), 0o755)
+	large := bytes.Repeat([]byte("GeneralsX-XZ-progress-"), 16*1024)
+	small := []byte("small payload\n")
+	launcher := []byte("#!/bin/sh\n")
+	mustWrite(t, filepath.Join(source, "data", "large.big"), large, 0o644)
+	mustWrite(t, filepath.Join(source, "data", "small.ini"), small, 0o644)
+	mustWrite(t, filepath.Join(source, "data", "excluded.big"), bytes.Repeat([]byte("excluded"), 4096), 0o644)
+	mustWrite(t, filepath.Join(source, "run"), launcher, 0o755)
+
+	var updates []PackProgress
+	options := PackOptions{
+		Product:    "GeneralsXZH",
+		Version:    "test",
+		TargetOS:   "linux",
+		TargetArch: "amd64",
+		Entrypoint: "run",
+		Epoch:      time.Unix(1234, 0),
+		Exclude: func(name string, _ fs.DirEntry) (bool, error) {
+			return name == "data/excluded.big", nil
+		},
+		Progress: func(progress PackProgress) {
+			updates = append(updates, progress)
+		},
+	}
+	var withProgress bytes.Buffer
+	manifest, err := WriteTar(source, &withProgress, options)
+	if err != nil {
+		t.Fatalf("WriteTar with progress: %v", err)
+	}
+	wantTotal := int64(len(large) + len(small) + len(launcher))
+	if manifest.TotalSize != wantTotal {
+		t.Fatalf("manifest total = %d, want %d", manifest.TotalSize, wantTotal)
+	}
+	if len(updates) < 4 {
+		t.Fatalf("progress updates = %#v, want initial, intermediate, and completed events", updates)
+	}
+	if got := updates[0]; got != (PackProgress{TotalBytes: wantTotal}) {
+		t.Fatalf("initial progress = %#v, want 0/%d incomplete", got, wantTotal)
+	}
+	previous := int64(-1)
+	sawIntermediate := false
+	for index, got := range updates {
+		if got.TotalBytes != wantTotal {
+			t.Fatalf("update %d total = %d, want %d", index, got.TotalBytes, wantTotal)
+		}
+		if got.CompletedBytes < previous || got.CompletedBytes > got.TotalBytes {
+			t.Fatalf("update %d is not bounded and monotonic: previous=%d update=%#v", index, previous, got)
+		}
+		if got.CompletedBytes > 0 && got.CompletedBytes < got.TotalBytes {
+			sawIntermediate = true
+		}
+		if got.Complete && index != len(updates)-1 {
+			t.Fatalf("completion appeared before the final update: %#v", updates)
+		}
+		previous = got.CompletedBytes
+	}
+	if !sawIntermediate {
+		t.Fatalf("progress never advanced inside a source file: %#v", updates)
+	}
+	if got := updates[len(updates)-1]; got != (PackProgress{
+		CompletedBytes: wantTotal,
+		TotalBytes:     wantTotal,
+		Complete:       true,
+	}) {
+		t.Fatalf("final progress = %#v, want completed %d/%d", got, wantTotal, wantTotal)
+	}
+
+	options.Progress = nil
+	var withoutProgress bytes.Buffer
+	secondManifest, err := WriteTar(source, &withoutProgress, options)
+	if err != nil {
+		t.Fatalf("WriteTar without progress: %v", err)
+	}
+	if !bytes.Equal(withProgress.Bytes(), withoutProgress.Bytes()) {
+		t.Fatal("enabling progress changed deterministic tar bytes")
+	}
+	if !reflect.DeepEqual(manifest, secondManifest) {
+		t.Fatal("enabling progress changed the generated manifest")
+	}
+}
+
 // GeneralsX @bugfix Codex 04/08/2026 Cover executable-mode synthesis when Windows hosts cross-package POSIX launchers.
 func TestNormalizeSourceEntryModeForWindowsCrossPackaging(t *testing.T) {
 	tests := []struct {
@@ -805,7 +889,7 @@ func TestStreamFileRejectsSameSizeMutationDuringPacking(t *testing.T) {
 			Mode: uint32(info.Mode().Perm()),
 			Size: info.Size(),
 		},
-	})
+	}, nil)
 	if err == nil || !strings.Contains(err.Error(), "changed while packing") {
 		t.Fatalf("streamFile mutation error = %v", err)
 	}

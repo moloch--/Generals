@@ -81,6 +81,10 @@ func testApp(t *testing.T, recorder *eventRecorder) (*App, BuildRequest, *appDep
 	dependencies.newJobID = func() string { return "job-fixture" }
 	dependencies.verifyArtifact = func(context.Context, string, string) error { return nil }
 	dependencies.shutdownTimeout = time.Second
+	cleanupState := t.TempDir()
+	dependencies.cleanupLedgerPath = func() (string, error) {
+		return filepath.Join(cleanupState, "private", "cleanup-ownership-v1.json"), nil
+	}
 	app := newApp(dependencies)
 	app.startup(context.Background())
 	defaults, err := app.GetDefaults()
@@ -88,14 +92,23 @@ func testApp(t *testing.T, recorder *eventRecorder) (*App, BuildRequest, *appDep
 		t.Fatal(err)
 	}
 	request := defaults.Request
+	workspace := t.TempDir()
 	request.Target = fileArtifactTestTarget()
+	request.RepoRoot = filepath.Join(workspace, "source")
+	request.CacheDir = filepath.Join(workspace, "cache")
+	request.SteamCMDDir = filepath.Join(request.CacheDir, "steamcmd")
+	request.AssetsDir = filepath.Join(workspace, "assets")
+	outputDirectory := filepath.Join(workspace, "output")
+	if err := os.MkdirAll(outputDirectory, 0o700); err != nil {
+		t.Fatal(err)
+	}
 	request.AppOutput = ""
 	request.SkipAssets = true
 	outputName := "GeneralsXZH-sfx"
 	if request.Target == "windows" {
 		outputName += ".exe"
 	}
-	request.Output = filepath.Join(t.TempDir(), outputName)
+	request.Output = filepath.Join(outputDirectory, outputName)
 	return app, request, &dependencies
 }
 
@@ -519,6 +532,71 @@ func TestCopyBuildArtifactToDesktopCopiesOnlyTheMatchingSuccessfulBuild(t *testi
 	}
 }
 
+func TestCopyBuildArtifactToDesktopStreamsScopedProgressBeforeAuthoritativeResult(t *testing.T) {
+	t.Parallel()
+	recorder := newEventRecorder()
+	app, request, dependencies := testApp(t, recorder)
+	desktop := t.TempDir()
+	payload := []byte("verified SFX copy progress fixture")
+	dependencies.desktopDirectory = func() (string, error) { return desktop, nil }
+	dependencies.builder = func(_ context.Context, _ []string, _ io.Reader, _, _ io.Writer, _ buildcli.RunOptions) int {
+		if err := os.WriteFile(request.Output, payload, 0o700); err != nil {
+			t.Errorf("write source artifact: %v", err)
+			return 1
+		}
+		return 0
+	}
+	app.dependencies = *dependencies
+
+	jobID, err := app.StartBuild(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	recorder.waitForProgress(t, "success")
+	if _, err := app.CopyBuildArtifactToDesktopWithProgress(jobID, ""); err == nil {
+		t.Fatal("empty Desktop copy operation ID was accepted")
+	}
+	destination, err := app.CopyBuildArtifactToDesktopWithProgress(jobID, "copy-operation-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var copyEvents []CopyProgressEvent
+	for _, event := range recorder.snapshot() {
+		if event.name != copyProgressEventName {
+			continue
+		}
+		progress, ok := event.payload.(CopyProgressEvent)
+		if !ok {
+			t.Fatalf("copy progress payload = %T", event.payload)
+		}
+		if progress.JobID != jobID || progress.OperationID != "copy-operation-1" {
+			t.Fatalf("copy progress scope = %#v", progress)
+		}
+		copyEvents = append(copyEvents, progress)
+	}
+	if len(copyEvents) < 5 {
+		t.Fatalf("copy progress events = %#v", copyEvents)
+	}
+	previousBytes := int64(0)
+	terminalCount := 0
+	for _, event := range copyEvents {
+		if event.BytesCopied < previousBytes {
+			t.Fatalf("copy event bytes regressed from %d to %d", previousBytes, event.BytesCopied)
+		}
+		previousBytes = event.BytesCopied
+		if event.Status != "running" {
+			terminalCount++
+		}
+	}
+	last := copyEvents[len(copyEvents)-1]
+	if terminalCount != 1 || last.Status != "success" || last.Phase != "complete" ||
+		last.Percent != 100 || last.BytesCopied != int64(len(payload)) || last.TotalBytes != int64(len(payload)) ||
+		last.Message != destination {
+		t.Fatalf("terminal copy progress = %#v (terminal count %d)", last, terminalCount)
+	}
+}
+
 func TestMacOSBuildPublishesVerifiedApplicationBundle(t *testing.T) {
 	if runtime.GOOS != "darwin" {
 		t.Skip("macOS application builds require a Darwin host")
@@ -916,7 +994,7 @@ func TestShutdownCancelsAndWaitsForDesktopCopy(t *testing.T) {
 	recorder.waitForProgress(t, "success")
 	copyResult := make(chan error, 1)
 	go func() {
-		_, copyErr := app.CopyBuildArtifactToDesktop(jobID)
+		_, copyErr := app.CopyBuildArtifactToDesktopWithProgress(jobID, "copy-shutdown")
 		copyResult <- copyErr
 	}()
 	<-copyStarted
@@ -935,6 +1013,17 @@ func TestShutdownCancelsAndWaitsForDesktopCopy(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("Desktop copy did not return after shutdown")
+	}
+	var terminal *CopyProgressEvent
+	for _, event := range recorder.snapshot() {
+		progress, ok := event.payload.(CopyProgressEvent)
+		if ok && event.name == copyProgressEventName && progress.OperationID == "copy-shutdown" && progress.Status != "running" {
+			copy := progress
+			terminal = &copy
+		}
+	}
+	if terminal == nil || terminal.Status != "cancelled" {
+		t.Fatalf("cancelled Desktop copy terminal event = %#v", terminal)
 	}
 	if _, err := app.CopyBuildArtifactToDesktop(jobID); err == nil || !strings.Contains(err.Error(), "shutting down") {
 		t.Fatalf("CopyBuildArtifactToDesktop() after shutdown error = %v", err)

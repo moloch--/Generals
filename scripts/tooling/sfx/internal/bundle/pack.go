@@ -52,6 +52,20 @@ const (
 // complete subtree. The path is a normalized, slash-separated archive path.
 type ExcludeFunc func(path string, entry fs.DirEntry) (bool, error)
 
+// GeneralsX @feature Codex 05/08/2026 Expose byte-accurate source progress to shared SFX packer frontends.
+// PackProgress reports regular-file source bytes accepted by the archive
+// writer. TotalBytes is calculated after exclusions. Complete becomes true
+// only after the complete tar input and generated manifest have been
+// validated; compression finalization may still remain afterward.
+type PackProgress struct {
+	CompletedBytes int64
+	TotalBytes     int64
+	Complete       bool
+}
+
+// PackProgressFunc observes source packing without changing archive contents.
+type PackProgressFunc func(PackProgress)
+
 // PackOptions defines immutable bundle metadata and source-tree policy.
 type PackOptions struct {
 	Context                context.Context
@@ -64,6 +78,7 @@ type PackOptions struct {
 	OnlineServerEntrypoint string
 	Epoch                  time.Time
 	Exclude                ExcludeFunc
+	Progress               PackProgressFunc
 	SymlinkMode            SymlinkMode
 	Limits                 Limits
 }
@@ -96,6 +111,8 @@ func WriteTar(root string, w io.Writer, opts PackOptions) (Manifest, error) {
 	if err != nil {
 		return Manifest{}, err
 	}
+	progress := newPackProgressWriter(manifest.TotalSize, opts.Progress)
+	progress.report(false)
 
 	tw := tar.NewWriter(w)
 	for i := range items {
@@ -112,7 +129,7 @@ func WriteTar(root string, w io.Writer, opts PackOptions) (Manifest, error) {
 		if item.entry.Type != EntryFile {
 			continue
 		}
-		digest, err := streamFile(ctx, tw, *item)
+		digest, err := streamFile(ctx, tw, *item, progress)
 		if err != nil {
 			_ = tw.Close()
 			return Manifest{}, err
@@ -126,6 +143,7 @@ func WriteTar(root string, w io.Writer, opts PackOptions) (Manifest, error) {
 	if err := manifest.Validate(); err != nil {
 		return Manifest{}, fmt.Errorf("validate generated manifest: %w", err)
 	}
+	progress.report(true)
 	return manifest, nil
 }
 
@@ -351,7 +369,7 @@ func normalizedHeader(entry Entry, epoch time.Time) *tar.Header {
 	return header
 }
 
-func streamFile(ctx context.Context, w io.Writer, item sourceItem) (string, error) {
+func streamFile(ctx context.Context, w io.Writer, item sourceItem, progress *packProgressWriter) (string, error) {
 	expected := item.entry
 	file, err := os.Open(item.full)
 	if err != nil {
@@ -370,8 +388,12 @@ func streamFile(ctx context.Context, w io.Writer, item sourceItem) (string, erro
 	}
 
 	hash := sha256.New()
+	destinations := []io.Writer{w, hash}
+	if progress != nil {
+		destinations = append(destinations, progress)
+	}
 	written, err := io.CopyN(
-		io.MultiWriter(w, hash),
+		io.MultiWriter(destinations...),
 		&contextReader{ctx: ctx, reader: file},
 		expected.Size,
 	)
@@ -420,6 +442,42 @@ func streamFile(ctx context.Context, w io.Writer, item sourceItem) (string, erro
 		return "", fmt.Errorf("source file %q changed while packing", expected.Path)
 	}
 	return fmt.Sprintf("%x", streamDigest), nil
+}
+
+type packProgressWriter struct {
+	completed int64
+	total     int64
+	reportFn  PackProgressFunc
+}
+
+func newPackProgressWriter(total int64, report PackProgressFunc) *packProgressWriter {
+	if report == nil {
+		return nil
+	}
+	return &packProgressWriter{total: total, reportFn: report}
+}
+
+func (writer *packProgressWriter) Write(data []byte) (int, error) {
+	if int64(len(data)) > writer.total-writer.completed {
+		return 0, fmt.Errorf(
+			"bundle source progress exceeds declared total of %d bytes",
+			writer.total,
+		)
+	}
+	writer.completed += int64(len(data))
+	writer.report(false)
+	return len(data), nil
+}
+
+func (writer *packProgressWriter) report(complete bool) {
+	if writer == nil || writer.reportFn == nil {
+		return
+	}
+	writer.reportFn(PackProgress{
+		CompletedBytes: writer.completed,
+		TotalBytes:     writer.total,
+		Complete:       complete,
+	})
 }
 
 type contextReader struct {

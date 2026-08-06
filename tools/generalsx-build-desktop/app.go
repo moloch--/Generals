@@ -19,8 +19,9 @@ import (
 )
 
 const (
-	progressEventName = "builder:progress"
-	logEventName      = "builder:log"
+	progressEventName     = "builder:progress"
+	logEventName          = "builder:log"
+	copyProgressEventName = "builder:copy-progress"
 )
 
 type ProgressEvent struct {
@@ -36,6 +37,17 @@ type LogEvent struct {
 	JobID  string `json:"jobId"`
 	Stream string `json:"stream"`
 	Text   string `json:"text"`
+}
+
+type CopyProgressEvent struct {
+	JobID       string `json:"jobId"`
+	OperationID string `json:"operationId"`
+	Phase       string `json:"phase"`
+	Status      string `json:"status"`
+	Message     string `json:"message"`
+	BytesCopied int64  `json:"bytesCopied"`
+	TotalBytes  int64  `json:"totalBytes"`
+	Percent     int    `json:"percent"`
 }
 
 type buildMainFunc func(context.Context, []string, io.Reader, io.Writer, io.Writer, buildcli.RunOptions) int
@@ -56,6 +68,7 @@ type appDependencies struct {
 	interactiveRunner buildcli.InteractiveCommandRunner
 	newJobID          func() string
 	loadDefaults      func() (buildcli.ConfigurationDefaults, error)
+	cleanupLedgerPath func() (string, error)
 	stdin             io.Reader
 	stdout            io.Writer
 	stderr            io.Writer
@@ -129,6 +142,7 @@ func defaultAppDependencies() appDependencies {
 		interactiveRunner: newTerminalInteractiveRunner(),
 		newJobID:          generateJobID,
 		loadDefaults:      buildcli.LoadConfigurationDefaults,
+		cleanupLedgerPath: cleanupDefaultOwnershipLedgerPath,
 		stdin:             strings.NewReader(""),
 		stdout:            io.Discard,
 		stderr:            io.Discard,
@@ -205,7 +219,14 @@ func (a *App) StartBuild(request BuildRequest) (string, error) {
 			return "", fmt.Errorf("resolve build artifact path: %w", err)
 		}
 	}
-	cleanupSnapshot := snapshotBuildCleanup(request, a.dependencies.hostOS)
+	cleanupLedgerPath := ""
+	if a.dependencies.cleanupLedgerPath != nil {
+		cleanupLedgerPath, err = a.dependencies.cleanupLedgerPath()
+		if err != nil {
+			return "", fmt.Errorf("resolve cleanup ownership ledger: %w", err)
+		}
+	}
+	cleanupSnapshot := snapshotBuildCleanupWithOwnership(request, a.dependencies.hostOS, cleanupLedgerPath)
 
 	a.mu.Lock()
 	if a.shuttingDown {
@@ -318,6 +339,14 @@ func (a *App) runBuild(ctx context.Context, job *activeBuild, arguments []string
 	var artifactErr error
 	var completedArtifact *completedArtifact
 	var cleanupReceipt *buildCleanupReceipt
+	if !job.dryRun {
+		cleanupReceipt = finalizeBuildCleanup(job.id, job.cleanupSnapshot)
+		if err := persistBuildCleanupOwnership(cleanupReceipt, !cancelled && exitCode == 0); err != nil {
+			fmt.Fprintf(stderr, "Cleanup ownership could not be persisted; build files will be preserved: %v\n", err)
+			discardBuildCleanupReceipt(cleanupReceipt)
+			cleanupReceipt = nil
+		}
+	}
 	if !cancelled && exitCode == 0 && !job.dryRun {
 		completed, err := inspectCompletedArtifactContext(ctx, job.id, job.artifactPath)
 		if err != nil {
@@ -331,7 +360,6 @@ func (a *App) runBuild(ctx context.Context, job *activeBuild, arguments []string
 		} else {
 			completed.target = job.target
 			completedArtifact = completed
-			cleanupReceipt = finalizeBuildCleanup(job.id, job.cleanupSnapshot)
 		}
 	}
 	progress := ProgressEvent{

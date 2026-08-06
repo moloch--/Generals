@@ -5,6 +5,7 @@ import type {
   BuildLogEvent,
   BuildProgressEvent,
   BuildRequest,
+  CopyProgressEvent,
   DesktopDefaults,
   DirectoryKind,
   ValidationIssue,
@@ -17,6 +18,7 @@ interface WailsAppBinding {
   StartBuild(request: BuildRequest): Promise<string>;
   WaitForBuild(jobId: string): Promise<BuildProgressEvent>;
   CopyBuildArtifactToDesktop(jobId: string): Promise<string>;
+  CopyBuildArtifactToDesktopWithProgress(jobId: string, operationId: string): Promise<string>;
   GetBuildCleanupPlan(jobId: string): Promise<BuildCleanupPlan>;
   CleanupBuild(jobId: string, planId: string): Promise<string>;
   CancelBuild(): Promise<boolean>;
@@ -39,9 +41,11 @@ declare global {
 
 type ProgressListener = (event: BuildProgressEvent) => void;
 type LogListener = (event: BuildLogEvent) => void;
+type CopyProgressListener = (event: CopyProgressEvent) => void;
 
 const progressListeners = new Set<ProgressListener>();
 const logListeners = new Set<LogListener>();
+const copyProgressListeners = new Set<CopyProgressListener>();
 let mockTimers: number[] = [];
 let mockJobId = "";
 let mockPercent = 0;
@@ -49,6 +53,8 @@ let mockArtifactPath = "";
 let mockDryRun = false;
 let mockArtifactVerified = false;
 let mockDesktopCopyPath = "";
+let mockCopyOperationId = "";
+let mockCopyInProgress = false;
 let mockCleanupPlanId = "";
 let mockCleanupPlanSequence = 0;
 let mockCleanupCompleted = false;
@@ -145,6 +151,10 @@ function emitMockProgress(event: BuildProgressEvent): void {
 
 function emitMockLog(event: BuildLogEvent): void {
   logListeners.forEach((listener) => listener(event));
+}
+
+function emitMockCopyProgress(event: CopyProgressEvent): void {
+  copyProgressListeners.forEach((listener) => listener(event));
 }
 
 function clearMockTimers(): void {
@@ -307,6 +317,8 @@ export const desktopBackend = {
     mockDryRun = request.dryRun;
     mockArtifactVerified = false;
     mockDesktopCopyPath = "";
+    mockCopyOperationId = "";
+    mockCopyInProgress = false;
     mockCleanupPlanId = "";
     mockCleanupCompleted = false;
     mockCleanupInProgress = false;
@@ -332,9 +344,9 @@ export const desktopBackend = {
     return mockTerminalResult;
   },
 
-  async copyBuildArtifactToDesktop(jobId: string): Promise<string> {
+  async copyBuildArtifactToDesktop(jobId: string, operationId: string): Promise<string> {
     if (backendMode === "wails") {
-      return requireWailsApp().CopyBuildArtifactToDesktop(jobId);
+      return requireWailsApp().CopyBuildArtifactToDesktopWithProgress(jobId, operationId);
     }
     if (backendMode === "unavailable") {
       throw new Error(unavailableMessage);
@@ -344,14 +356,55 @@ export const desktopBackend = {
       mockDryRun ||
       !mockArtifactPath ||
       !mockArtifactVerified ||
+      !operationId.trim() ||
+      mockCopyInProgress ||
       mockCleanupCompleted ||
       mockCleanupInProgress
     ) {
       throw new Error("No verified build artifact is available for this preview build.");
     }
-    await new Promise((resolve) => window.setTimeout(resolve, 400));
-    mockDesktopCopyPath = previewDesktopCopyPath(mockArtifactPath);
-    return mockDesktopCopyPath;
+    mockCopyOperationId = operationId;
+    mockCopyInProgress = true;
+    const totalBytes = 1_342_177_280;
+    const emit = (
+      phase: CopyProgressEvent["phase"],
+      status: CopyProgressEvent["status"],
+      message: string,
+      bytesCopied: number,
+    ) => emitMockCopyProgress({
+      jobId,
+      operationId,
+      phase,
+      status,
+      message,
+      bytesCopied,
+      totalBytes: phase === "preparing" ? 0 : totalBytes,
+      percent: phase === "preparing" ? 0 : Math.round((bytesCopied / totalBytes) * 100),
+    });
+    try {
+      emit("preparing", "running", "Preparing the Desktop copy", 0);
+      for (const fraction of [0, 0.18, 0.47, 0.76, 1]) {
+        await new Promise((resolve) => window.setTimeout(resolve, 90));
+        if (mockCopyOperationId !== operationId || mockJobId !== jobId) {
+          throw new Error("The preview Desktop copy is no longer active.");
+        }
+        emit("copying", "running", "Copying artifact bytes to Desktop", Math.round(totalBytes * fraction));
+      }
+      emit("verifying", "running", "Verifying the copied Desktop artifact", totalBytes);
+      await new Promise((resolve) => window.setTimeout(resolve, 120));
+      emit("publishing", "running", "Publishing the verified artifact to Desktop", totalBytes);
+      await new Promise((resolve) => window.setTimeout(resolve, 90));
+      mockDesktopCopyPath = previewDesktopCopyPath(mockArtifactPath);
+      emit("complete", "success", mockDesktopCopyPath, totalBytes);
+      return mockDesktopCopyPath;
+    } catch (error) {
+      emit("complete", "error", error instanceof Error ? error.message : String(error), 0);
+      throw error;
+    } finally {
+      if (mockCopyOperationId === operationId) {
+        mockCopyInProgress = false;
+      }
+    }
   },
 
   // GeneralsX @feature Codex 05/08/2026 Preview the same explicit cleanup plan required by the native backend.
@@ -435,6 +488,8 @@ export const desktopBackend = {
     clearMockTimers();
     mockArtifactVerified = false;
     mockDesktopCopyPath = "";
+    mockCopyOperationId = "";
+    mockCopyInProgress = false;
     mockCleanupPlanId = "";
     mockCleanupCompleted = false;
     mockCleanupInProgress = false;
@@ -468,6 +523,17 @@ export const desktopBackend = {
     if (backendMode === "preview") {
       logListeners.add(listener);
       return () => logListeners.delete(listener);
+    }
+    return () => undefined;
+  },
+
+  onCopyProgress(listener: CopyProgressListener): () => void {
+    if (backendMode === "wails") {
+      return subscribeWailsEvent<CopyProgressEvent>("builder:copy-progress", listener) ?? (() => undefined);
+    }
+    if (backendMode === "preview") {
+      copyProgressListeners.add(listener);
+      return () => copyProgressListeners.delete(listener);
     }
     return () => undefined;
   },
