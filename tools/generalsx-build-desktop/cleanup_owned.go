@@ -627,7 +627,7 @@ func cleanupValidateMarkerPath(path string, recorded fs.FileInfo, contents []byt
 	if err != nil {
 		return fmt.Errorf("inspect ownership marker: %w", err)
 	}
-	if recorded == nil || !current.Mode().IsRegular() || current.Mode()&os.ModeSymlink != 0 || !os.SameFile(recorded, current) {
+	if recorded == nil || !current.Mode().IsRegular() || current.Mode()&os.ModeSymlink != 0 || !artifactInfoMatches(recorded, current) {
 		return errors.New("ownership marker identity changed")
 	}
 	file, err := os.Open(path)
@@ -636,7 +636,7 @@ func cleanupValidateMarkerPath(path string, recorded fs.FileInfo, contents []byt
 	}
 	defer file.Close()
 	openedInfo, err := file.Stat()
-	if err != nil || !os.SameFile(recorded, openedInfo) {
+	if err != nil || !artifactInfoMatches(recorded, openedInfo) {
 		return errors.New("ownership marker changed before it could be read")
 	}
 	actual, err := io.ReadAll(io.LimitReader(file, cleanupMarkerReadLimit+1))
@@ -1030,7 +1030,7 @@ func cleanupValidateMarkerInRoot(root *os.Root, candidate cleanupOwnedPath) erro
 		return errors.New("internal ownership marker has no relative path")
 	}
 	current, err := root.Lstat(candidate.markerRelative)
-	if err != nil || !current.Mode().IsRegular() || current.Mode()&os.ModeSymlink != 0 || !os.SameFile(candidate.markerInfo, current) {
+	if err != nil || !current.Mode().IsRegular() || current.Mode()&os.ModeSymlink != 0 || !artifactInfoMatches(candidate.markerInfo, current) {
 		return errors.New("internal ownership marker identity changed")
 	}
 	file, err := root.Open(candidate.markerRelative)
@@ -1039,7 +1039,7 @@ func cleanupValidateMarkerInRoot(root *os.Root, candidate cleanupOwnedPath) erro
 	}
 	defer file.Close()
 	opened, err := file.Stat()
-	if err != nil || !os.SameFile(candidate.markerInfo, opened) {
+	if err != nil || !artifactInfoMatches(candidate.markerInfo, opened) {
 		return errors.New("internal ownership marker changed while opened")
 	}
 	contents, err := io.ReadAll(io.LimitReader(file, cleanupMarkerReadLimit+1))

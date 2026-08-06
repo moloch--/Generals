@@ -9,6 +9,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestBuildCleanupFreshRootsPreserveDesktopAndAssets(t *testing.T) {
@@ -251,6 +252,10 @@ func TestDiscardBuildCleanupReceiptDoesNotRemoveReplacedMarker(t *testing.T) {
 		t.Fatal(err)
 	}
 	cleanupWriteFile(t, marker, receipt.candidates[0].markerContents, 0o600)
+	replacementTime := receipt.candidates[0].markerInfo.ModTime().Add(2 * time.Second)
+	if err := os.Chtimes(marker, replacementTime, replacementTime); err != nil {
+		t.Fatal(err)
+	}
 	discardBuildCleanupReceipt(receipt)
 	if _, err := os.Stat(marker); err != nil {
 		t.Fatalf("replaced marker was removed: %v", err)
