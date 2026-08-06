@@ -291,7 +291,10 @@ go run ./cmd/generalsx-build \
 
 This path is entirely opt-in. Without the flag, the builder never clones or
 compiles `generals-server`, and the SFX contains only the game client and its
-runtime dependencies.
+runtime dependencies. Generated clients connect to
+`tls://multiplayer.generals.network` by default; pass `--online-endpoint` to
+override that endpoint or `--online-endpoint=` to compile no replacement
+default.
 
 The source selection order is:
 
@@ -300,10 +303,10 @@ The source selection order is:
 3. a managed clone of `https://github.com/moloch--/generals-server.git` at
    `--online-server-ref main`.
 
-The option also compiles `127.0.0.1:29900` as the game's default Online
-endpoint unless `--online-endpoint` supplies another valid DNS/IPv4 endpoint.
-The server is embedded but never started automatically. Start its safe
-same-machine configuration in one terminal:
+The server is embedded but never started automatically. To connect the game to
+that same-machine server instead of the public default, pass
+`--online-endpoint=127.0.0.1:29900`. Start its safe configuration in one
+terminal:
 
 ```sh
 ./build/sfx/GeneralsXZH-macos-arm64-sfx --sfx-server
@@ -371,7 +374,7 @@ Useful advanced controls include:
 - `--output` and macOS `--app-output` to select publication paths;
 - `--cache-dir` and `--steamcmd-dir` to select managed cache locations;
 - `--source-repo` and `--online-server-repo` for deliberate repository mirrors;
-- `--online-endpoint [tls://]HOST[:PORT]` for a non-loopback compiled endpoint.
+- `--online-endpoint [tls://]HOST[:PORT]` to override the compiled endpoint.
 
 The builder rejects an output workspace that overlaps the retail asset tree,
 unsafe archive paths, incomplete managed checkouts, wrong-architecture server

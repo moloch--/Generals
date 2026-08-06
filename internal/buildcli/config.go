@@ -18,6 +18,8 @@ const (
 	zeroHourSteamAppID = "2732960"
 	defaultSourceRepo  = "https://github.com/moloch--/Generals.git"
 	defaultServerRepo  = "https://github.com/moloch--/generals-server.git"
+	// GeneralsX @build Codex 05/08/2026 Connect generated clients to the public multiplayer service by default.
+	defaultOnlineEndpoint = "tls://multiplayer.generals.network"
 )
 
 type target string
@@ -119,6 +121,7 @@ func LoadConfigurationDefaults() (ConfigurationDefaults, error) {
 		InstallDependencies:    true,
 		OnlineServerRepository: defaultServerRepo,
 		OnlineServerReference:  "main",
+		OnlineEndpoint:         defaultOnlineEndpoint,
 	}
 	if resolvedTarget == targetMacOS {
 		defaults.AppOutputPath = filepath.Join(repositoryRoot, "build", "sfx", "GeneralsXZH.app")

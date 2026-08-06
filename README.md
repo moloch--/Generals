@@ -87,7 +87,11 @@ external commands first.
 
 Without `--with-online-server`, the builder does not clone, compile, package,
 or start the backend; the normal output contains only the game client and its
-runtime dependencies.
+runtime dependencies. The Automated Build Tool compiles
+`tls://multiplayer.generals.network` as that client's default Online endpoint;
+use `--online-endpoint` to select another valid endpoint or
+`--online-endpoint=` to leave the generated client without a replacement
+default.
 
 The produced game output is a CGO-free, single-file Go SFX launcher with no
 non-system shared-library dependency. It contains the native game, its required

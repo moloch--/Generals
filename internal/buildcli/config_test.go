@@ -38,7 +38,7 @@ func TestParseTarget(t *testing.T) {
 	}
 }
 
-func TestParseConfigOnlineServerDefaultsToLoopback(t *testing.T) {
+func TestParseConfigOnlineServerUsesPublicDefault(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
 	assets := filepath.Join(t.TempDir(), "assets")
@@ -55,7 +55,7 @@ func TestParseConfigOnlineServerDefaultsToLoopback(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parseConfig() error = %v, stderr = %s", err, stderr.String())
 	}
-	if cfg.onlineEndpoint != "127.0.0.1:29900" {
+	if cfg.onlineEndpoint != "tls://multiplayer.generals.network" {
 		t.Fatalf("onlineEndpoint = %q", cfg.onlineEndpoint)
 	}
 }
@@ -86,6 +86,9 @@ func TestLoadConfigurationDefaults(t *testing.T) {
 	}
 	if !defaults.InstallDependencies {
 		t.Fatal("InstallDependencies = false, want true")
+	}
+	if defaults.OnlineEndpoint != "tls://multiplayer.generals.network" {
+		t.Fatalf("OnlineEndpoint = %q, want public multiplayer service", defaults.OnlineEndpoint)
 	}
 	if defaults.SteamCMDDirectory != filepath.Join(defaults.CacheDirectory, "steamcmd") {
 		t.Fatalf("SteamCMDDirectory = %q", defaults.SteamCMDDirectory)
