@@ -31,7 +31,7 @@ func launchTerminalJob(ctx context.Context, desktopExecutable, specPath string) 
 		nil,
 		nil,
 		false,
-		windows.CREATE_NEW_CONSOLE,
+		windowsTerminalLaunchCreationFlags(),
 		nil,
 		nil,
 		&startupInfo,
@@ -42,6 +42,11 @@ func launchTerminalJob(ctx context.Context, desktopExecutable, specPath string) 
 	_ = windows.CloseHandle(processInfo.Thread)
 	_ = windows.CloseHandle(processInfo.Process)
 	return nil
+}
+
+// GeneralsX @bugfix Codex 05/08/2026 Keep the explicit SteamCMD handoff visible while background children stay hidden.
+func windowsTerminalLaunchCreationFlags() uint32 {
+	return windows.CREATE_NEW_CONSOLE
 }
 
 func windowsTerminalArguments(desktopExecutable, specPath string) []string {

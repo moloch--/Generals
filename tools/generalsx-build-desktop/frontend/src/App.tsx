@@ -7,6 +7,14 @@ import {AppHeader} from "./components/AppHeader";
 import {BuildStatus} from "./components/BuildStatus";
 import {WizardNavigation} from "./components/WizardNavigation";
 import {desktopBackend} from "./lib/backend";
+import {
+  beginBuildCancellation,
+  isTerminalProgressStatus,
+  reduceBuildProgress,
+  reduceExecutionProgress,
+  recoverBuildCancellation,
+  settleStartedExecution,
+} from "./lib/buildProgress";
 import {selectFinalStepPane} from "./lib/execution";
 import {
   applyDirectorySelection,
@@ -34,22 +42,6 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function executionState(status: string): ExecutionState | null {
-  if (["success", "succeeded", "complete", "completed"].includes(status)) {
-    return "success";
-  }
-  if (["error", "failed", "failure"].includes(status)) {
-    return "error";
-  }
-  if (["cancelled", "canceled"].includes(status)) {
-    return "cancelled";
-  }
-  if (["queued", "running", "started"].includes(status)) {
-    return "running";
-  }
-  return null;
-}
-
 export function App() {
   const [request, setRequest] = useState<BuildRequest>(emptyBuildRequest);
   const [hostOS, setHostOS] = useState("");
@@ -65,6 +57,34 @@ export function App() {
   const [isLoadingDefaults, setIsLoadingDefaults] = useState(true);
   const activeJobRef = useRef("");
   const isStartingRef = useRef(false);
+  const terminalJobRef = useRef("");
+  const pendingProgressRef = useRef<BuildProgressEvent[]>([]);
+  const pendingLogsRef = useRef<BuildLogEvent[]>([]);
+
+  const applyProgressEvent = useCallback((event: BuildProgressEvent) => {
+    if (event.jobId !== activeJobRef.current || terminalJobRef.current === event.jobId) {
+      return;
+    }
+    if (isTerminalProgressStatus(event.status)) {
+      terminalJobRef.current = event.jobId;
+    }
+    setProgress((current) => reduceBuildProgress(current, event));
+    setExecution((current) => reduceExecutionProgress(current, event));
+    if (event.status === "error") {
+      setExecutionError(
+        event.exitCode === undefined ? event.message : `${event.message} (exit code ${event.exitCode})`,
+      );
+    } else if (isTerminalProgressStatus(event.status)) {
+      setExecutionError("");
+    }
+  }, []);
+
+  const applyLogEvent = useCallback((event: BuildLogEvent) => {
+    if (event.jobId !== activeJobRef.current) {
+      return;
+    }
+    setLogs((previous) => [...previous, event].slice(-500));
+  }, []);
 
   const loadDefaults = useCallback(async () => {
     setIsLoadingDefaults(true);
@@ -88,39 +108,24 @@ export function App() {
   useEffect(() => {
     const stopProgress = desktopBackend.onProgress((event) => {
       if (!activeJobRef.current && isStartingRef.current) {
-        activeJobRef.current = event.jobId;
-      }
-      if (event.jobId !== activeJobRef.current) {
+        pendingProgressRef.current = [...pendingProgressRef.current, event].slice(-100);
         return;
       }
-      setProgress(event);
-      const nextState = executionState(event.status);
-      if (event.message.toLowerCase().includes("cancellation requested")) {
-        setExecution("cancelling");
-      } else if (nextState) {
-        setExecution(nextState);
-      }
-      if (nextState === "error") {
-        setExecutionError(
-          event.exitCode === undefined ? event.message : `${event.message} (exit code ${event.exitCode})`,
-        );
-      }
+      applyProgressEvent(event);
     });
     const stopLog = desktopBackend.onLog((event) => {
       if (!activeJobRef.current && isStartingRef.current) {
-        activeJobRef.current = event.jobId;
-      }
-      if (event.jobId !== activeJobRef.current) {
+        pendingLogsRef.current = [...pendingLogsRef.current, event].slice(-500);
         return;
       }
-      setLogs((previous) => [...previous, event].slice(-500));
+      applyLogEvent(event);
     });
 
     return () => {
       stopProgress();
       stopLog();
     };
-  }, []);
+  }, [applyLogEvent, applyProgressEvent]);
 
   const updateRequest = useCallback<BuildRequestUpdater>((field, value) => {
     setRequest((previous) => ({...previous, [field]: value}));
@@ -169,7 +174,12 @@ export function App() {
     setLogs([]);
     setProgress(null);
     setExecution("validating");
+    activeJobRef.current = "";
+    terminalJobRef.current = "";
+    pendingProgressRef.current = [];
+    pendingLogsRef.current = [];
 
+    let jobId = "";
     try {
       const validationIssues = await desktopBackend.validateBuild(normalized, legalAcknowledged);
       setIssues(validationIssues);
@@ -179,34 +189,60 @@ export function App() {
       }
 
       isStartingRef.current = true;
-      const jobId = await desktopBackend.startBuild(normalized);
+      jobId = await desktopBackend.startBuild(normalized);
       activeJobRef.current = jobId;
       isStartingRef.current = false;
-      setExecution("running");
+      for (const event of pendingLogsRef.current) {
+        applyLogEvent(event);
+      }
+      for (const event of pendingProgressRef.current) {
+        applyProgressEvent(event);
+      }
+      pendingLogsRef.current = [];
+      pendingProgressRef.current = [];
+      setExecution(settleStartedExecution);
     } catch (error) {
       isStartingRef.current = false;
+      pendingLogsRef.current = [];
+      pendingProgressRef.current = [];
       setExecutionError(errorMessage(error));
       setExecution("error");
+      return;
     }
-  }, [legalAcknowledged, request]);
 
-  const cancelBuild = useCallback(async () => {
-    setExecution("cancelling");
     try {
-      const cancelled = await desktopBackend.cancelBuild();
-      if (!cancelled) {
-        setExecutionError("The builder could not cancel the active job. It may have already finished.");
+      const terminal = await desktopBackend.waitForBuild(jobId);
+      applyProgressEvent(terminal);
+    } catch (error) {
+      if (activeJobRef.current === jobId && terminalJobRef.current !== jobId) {
+        setExecutionError(`Could not confirm the final build status: ${errorMessage(error)}`);
         setExecution("error");
       }
+    }
+  }, [applyLogEvent, applyProgressEvent, legalAcknowledged, request]);
+
+  const cancelBuild = useCallback(async () => {
+    const jobId = activeJobRef.current;
+    setExecutionError("");
+    setExecution(beginBuildCancellation);
+    try {
+      // A false response means completion may have won the race. It is not a
+      // build failure; WaitForBuild remains the authoritative terminal result.
+      await desktopBackend.cancelBuild();
     } catch (error) {
-      setExecutionError(errorMessage(error));
-      setExecution("error");
+      if (activeJobRef.current === jobId && terminalJobRef.current !== jobId) {
+        setExecutionError(`Could not send the cancellation request: ${errorMessage(error)}. The build is still active; try again.`);
+        setExecution(recoverBuildCancellation);
+      }
     }
   }, []);
 
   const resetExecution = useCallback(() => {
     activeJobRef.current = "";
     isStartingRef.current = false;
+    terminalJobRef.current = "";
+    pendingProgressRef.current = [];
+    pendingLogsRef.current = [];
     setProgress(null);
     setLogs([]);
     setExecutionError("");

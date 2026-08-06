@@ -523,6 +523,7 @@ func runSFXVerifyCommand(ctx context.Context, executable string, arguments ...st
 	command := exec.CommandContext(ctx, executable, arguments...)
 	command.Stdout = &output
 	command.Stderr = &output
+	configureDesktopBackgroundCommand(command)
 	if err := command.Run(); err != nil {
 		if contextErr := ctx.Err(); contextErr != nil {
 			return contextErr

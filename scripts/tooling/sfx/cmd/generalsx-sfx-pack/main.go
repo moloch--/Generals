@@ -209,6 +209,8 @@ func run(ctx context.Context, arguments []string, stdout, stderr io.Writer) erro
 		targetArch,
 		compressorDescription,
 	)
+	// GeneralsX @tweak Codex 05/08/2026 Explain the intentionally quiet, CPU-heavy compression phase before it starts.
+	_, _ = fmt.Fprintln(stderr, "XZ compression can take several minutes and may be quiet while it runs.")
 
 	payloadPath := filepath.Join(generatedDir, "payload.tar.xz")
 	manifest, payloadDigest, payloadSize, err := writeCompressedPayload(

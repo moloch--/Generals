@@ -555,7 +555,7 @@ func (app application) bootstrapWindows(ctx context.Context, gitPath string) (ma
 	vswhere := locateVSWhere()
 	cppInstallation := ""
 	if vswhere != "" {
-		cppInstallation, _ = queryVisualStudioInstallation(ctx, vswhere, true)
+		cppInstallation, _ = app.queryVisualStudioInstallation(ctx, vswhere, true)
 	}
 	hasWindowsSDK := windowsSDKAvailable(os.Getenv("ProgramFiles(x86)"))
 	if cppInstallation == "" || !hasWindowsSDK {
@@ -567,7 +567,7 @@ func (app application) bootstrapWindows(ctx context.Context, gitPath string) (ma
 		}
 		existingInstallation := ""
 		if vswhere != "" {
-			existingInstallation, _ = queryVisualStudioInstallation(ctx, vswhere, false)
+			existingInstallation, _ = app.queryVisualStudioInstallation(ctx, vswhere, false)
 		}
 		if existingInstallation != "" {
 			setup := firstExistingFile(filepath.Join(filepath.Dir(vswhere), "setup.exe"))
@@ -602,7 +602,7 @@ func (app application) bootstrapWindows(ctx context.Context, gitPath string) (ma
 			}
 			cppInstallation = "<planned>"
 		} else if vswhere != "" {
-			cppInstallation, _ = queryVisualStudioInstallation(ctx, vswhere, true)
+			cppInstallation, _ = app.queryVisualStudioInstallation(ctx, vswhere, true)
 			hasWindowsSDK = windowsSDKAvailable(os.Getenv("ProgramFiles(x86)"))
 		}
 	}
@@ -712,7 +712,8 @@ func windowsSDKAvailable(programFilesX86 string) bool {
 	return false
 }
 
-func queryVisualStudioInstallation(ctx context.Context, vswhere string, requireCpp bool) (string, error) {
+// GeneralsX @bugfix Codex 05/08/2026 Keep Visual Studio discovery hidden when it belongs to the desktop build stream.
+func (app application) queryVisualStudioInstallation(ctx context.Context, vswhere string, requireCpp bool) (string, error) {
 	arguments := []string{"-latest", "-products", "*"}
 	if requireCpp {
 		arguments = append(arguments,
@@ -722,6 +723,7 @@ func queryVisualStudioInstallation(ctx context.Context, vswhere string, requireC
 	}
 	arguments = append(arguments, "-property", "installationPath")
 	command := exec.CommandContext(ctx, vswhere, arguments...)
+	configureBackgroundCommand(command, app.runner.hideWindow)
 	output, err := command.Output()
 	if err != nil {
 		return "", err

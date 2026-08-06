@@ -15,6 +15,7 @@ interface WailsAppBinding {
   ChooseDirectory(kind: DirectoryKind, current: string): Promise<string>;
   ValidateBuild(request: BuildRequest): Promise<ValidationIssue[]>;
   StartBuild(request: BuildRequest): Promise<string>;
+  WaitForBuild(jobId: string): Promise<BuildProgressEvent>;
   CopyBuildArtifactToDesktop(jobId: string): Promise<string>;
   GetBuildCleanupPlan(jobId: string): Promise<BuildCleanupPlan>;
   CleanupBuild(jobId: string, planId: string): Promise<string>;
@@ -52,6 +53,7 @@ let mockCleanupPlanId = "";
 let mockCleanupPlanSequence = 0;
 let mockCleanupCompleted = false;
 let mockCleanupInProgress = false;
+let mockTerminalResult: BuildProgressEvent | null = null;
 
 function wailsApp(): WailsAppBinding | undefined {
   return window.go?.main?.App;
@@ -135,6 +137,9 @@ function mockDefaults(): DesktopDefaults {
 
 function emitMockProgress(event: BuildProgressEvent): void {
   mockPercent = event.percent;
+  if (event.status === "success" || event.status === "error" || event.status === "cancelled") {
+    mockTerminalResult = event;
+  }
   progressListeners.forEach((listener) => listener(event));
 }
 
@@ -305,8 +310,26 @@ export const desktopBackend = {
     mockCleanupPlanId = "";
     mockCleanupCompleted = false;
     mockCleanupInProgress = false;
+    mockTerminalResult = null;
     scheduleMockBuild(mockJobId, request);
     return mockJobId;
+  },
+
+  // GeneralsX @bugfix Codex 05/08/2026 Reconcile streamed progress with the backend's durable terminal result.
+  async waitForBuild(jobId: string): Promise<BuildProgressEvent> {
+    if (backendMode === "wails") {
+      return requireWailsApp().WaitForBuild(jobId);
+    }
+    if (backendMode === "unavailable") {
+      throw new Error(unavailableMessage);
+    }
+    while (!mockTerminalResult || mockTerminalResult.jobId !== jobId) {
+      if (jobId !== mockJobId) {
+        throw new Error("The requested preview build job is unavailable.");
+      }
+      await new Promise((resolve) => window.setTimeout(resolve, 50));
+    }
+    return mockTerminalResult;
   },
 
   async copyBuildArtifactToDesktop(jobId: string): Promise<string> {

@@ -4,6 +4,7 @@ package main
 
 import (
 	"os"
+	"os/exec"
 	"slices"
 	"testing"
 
@@ -57,6 +58,9 @@ func TestWindowsInteractiveCommandStartsSuspendedInKillOnCloseJob(t *testing.T) 
 	if flags&windows.CREATE_SUSPENDED == 0 || flags&windows.CREATE_NEW_PROCESS_GROUP == 0 {
 		t.Fatalf("interactive process creation flags = %#x", flags)
 	}
+	if flags&windows.CREATE_NO_WINDOW != 0 || windowsTerminalLaunchCreationFlags() != windows.CREATE_NEW_CONSOLE {
+		t.Fatalf("interactive terminal was configured as a hidden background process: launch=%#x child=%#x", windowsTerminalLaunchCreationFlags(), flags)
+	}
 	limits := windowsTerminalJobLimits()
 	if limits.BasicLimitInformation.LimitFlags&windows.JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE == 0 {
 		t.Fatalf("interactive Job Object limit flags = %#x", limits.BasicLimitInformation.LimitFlags)
@@ -64,5 +68,14 @@ func TestWindowsInteractiveCommandStartsSuspendedInKillOnCloseJob(t *testing.T) 
 	access := windowsTerminalJobAssignmentProcessAccess()
 	if access&windows.PROCESS_SET_QUOTA == 0 || access&windows.PROCESS_TERMINATE == 0 {
 		t.Fatalf("interactive job assignment process access = %#x", access)
+	}
+}
+
+func TestWindowsDesktopBackgroundCommandIsHidden(t *testing.T) {
+	t.Parallel()
+	command := exec.Command("cmd.exe")
+	configureDesktopBackgroundCommand(command)
+	if command.SysProcAttr == nil || !command.SysProcAttr.HideWindow || command.SysProcAttr.CreationFlags&windows.CREATE_NO_WINDOW == 0 {
+		t.Fatalf("desktop background command was not hidden: %#v", command.SysProcAttr)
 	}
 }

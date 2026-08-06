@@ -75,6 +75,8 @@ type activeBuild struct {
 	done            chan struct{}
 	cancelRequested bool
 	finished        bool
+	terminalResult  ProgressEvent
+	terminalReady   bool
 	eventMu         sync.Mutex
 	terminalEmitted bool
 }
@@ -84,6 +86,7 @@ type App struct {
 	mu                sync.Mutex
 	ctx               context.Context
 	active            *activeBuild
+	lastTerminal      *ProgressEvent
 	completedArtifact *completedArtifact
 	desktopArtifact   *completedArtifact
 	cleanupReceipt    *buildCleanupReceipt
@@ -252,6 +255,36 @@ func (a *App) StartBuild(request BuildRequest) (string, error) {
 	return jobID, nil
 }
 
+// GeneralsX @bugfix Codex 05/08/2026 Provide a durable completion handshake when a streamed terminal event is delayed or missed.
+func (a *App) WaitForBuild(jobID string) (ProgressEvent, error) {
+	jobID = strings.TrimSpace(jobID)
+	if jobID == "" {
+		return ProgressEvent{}, errors.New("build job ID is empty")
+	}
+
+	a.mu.Lock()
+	job := a.active
+	if job != nil && job.id == jobID {
+		done := job.done
+		a.mu.Unlock()
+
+		<-done
+		a.mu.Lock()
+		defer a.mu.Unlock()
+		if !job.terminalReady {
+			return ProgressEvent{}, errors.New("the build finished without a terminal result")
+		}
+		return job.terminalResult, nil
+	}
+	if a.lastTerminal != nil && a.lastTerminal.JobID == jobID {
+		result := *a.lastTerminal
+		a.mu.Unlock()
+		return result, nil
+	}
+	a.mu.Unlock()
+	return ProgressEvent{}, errors.New("the requested build job is unavailable")
+}
+
 func (a *App) runBuild(ctx context.Context, job *activeBuild, arguments []string) {
 	eventContext := a.runtimeContext()
 	stdoutEvents := eventWriter{ctx: eventContext, jobID: job.id, stream: "stdout", emit: a.dependencies.emit}
@@ -273,8 +306,9 @@ func (a *App) runBuild(ctx context.Context, job *activeBuild, arguments []string
 		return a.dependencies.interactiveRunner.RunInteractive(ctx, command)
 	})
 	exitCode := a.dependencies.builder(ctx, arguments, a.dependencies.stdin, stdout, stderr, buildcli.RunOptions{
-		Reporter:          reporter,
-		InteractiveRunner: interactiveRunner,
+		Reporter:              reporter,
+		InteractiveRunner:     interactiveRunner,
+		HideBackgroundWindows: true,
 	})
 	a.mu.Lock()
 	phase := job.phase
@@ -300,21 +334,11 @@ func (a *App) runBuild(ctx context.Context, job *activeBuild, arguments []string
 			cleanupReceipt = finalizeBuildCleanup(job.id, job.cleanupSnapshot)
 		}
 	}
-	a.mu.Lock()
-	cancelled = job.cancelRequested || ctx.Err() != nil
-	job.finished = true
-	if !cancelled && artifactErr == nil && completedArtifact != nil {
-		a.completedArtifact = completedArtifact
-		a.cleanupReceipt = cleanupReceipt
-	}
-	a.mu.Unlock()
-	if cancelled && cleanupReceipt != nil {
-		discardBuildCleanupReceipt(cleanupReceipt)
-	}
-
 	progress := ProgressEvent{
 		JobID: job.id, Phase: phase, Percent: -1, ExitCode: exitCode,
 	}
+	a.mu.Lock()
+	cancelled = job.cancelRequested || ctx.Err() != nil
 	if cancelled {
 		progress.Status = "cancelled"
 		progress.Message = "Build cancelled"
@@ -331,14 +355,30 @@ func (a *App) runBuild(ctx context.Context, job *activeBuild, arguments []string
 		progress.Status = "error"
 		progress.Message = fmt.Sprintf("Build failed with exit code %d", exitCode)
 	}
-	a.emitJobProgress(eventContext, job, progress)
+	job.finished = true
+	job.terminalResult = progress
+	job.terminalReady = true
+	terminalCopy := progress
+	a.lastTerminal = &terminalCopy
+	if progress.Status == "success" && completedArtifact != nil {
+		a.completedArtifact = completedArtifact
+		a.cleanupReceipt = cleanupReceipt
+	}
+	a.mu.Unlock()
+	if cancelled && cleanupReceipt != nil {
+		discardBuildCleanupReceipt(cleanupReceipt)
+	}
 
+	// Publish the durable result before the best-effort Wails event. Event
+	// delivery can be delayed by the frontend, but completion must not remain
+	// stuck at the preceding verification percentage.
 	a.mu.Lock()
 	if a.active == job {
 		a.active = nil
 	}
 	close(job.done)
 	a.mu.Unlock()
+	a.emitJobProgress(eventContext, job, progress)
 }
 
 func interactiveHandoffProgress(purpose buildcli.InteractivePurpose) (string, string) {

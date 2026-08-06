@@ -49,10 +49,11 @@ func MainWithOptions(ctx context.Context, arguments []string, stdin io.Reader, s
 	app := application{
 		cfg: cfg,
 		runner: runner{
-			dryRun: cfg.dryRun,
-			stdin:  stdin,
-			stdout: stdout,
-			stderr: stderr,
+			dryRun:     cfg.dryRun,
+			stdin:      stdin,
+			stdout:     stdout,
+			stderr:     stderr,
+			hideWindow: options.HideBackgroundWindows,
 		},
 		hostOS:            runtime.GOOS,
 		hostArch:          runtime.GOARCH,

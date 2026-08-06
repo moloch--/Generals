@@ -578,8 +578,13 @@ func TestRunBuildsRealPackedLauncherWithoutTouchingModule(t *testing.T) {
 	if got := strings.TrimSpace(stdout.String()); got != canonicalOutputPath {
 		t.Fatalf("packer stdout = %q, want %q", got, canonicalOutputPath)
 	}
-	if !strings.Contains(stderr.String(), "packing ") || !strings.Contains(stderr.String(), "linking launcher") {
+	progressOutput := stderr.String()
+	xzNotice := "XZ compression can take several minutes and may be quiet while it runs."
+	if !strings.Contains(progressOutput, "packing ") || !strings.Contains(progressOutput, "linking launcher") || !strings.Contains(progressOutput, xzNotice) {
 		t.Fatalf("packer progress output is incomplete: %q", stderr.String())
+	}
+	if noticeIndex, linkIndex := strings.Index(progressOutput, xzNotice), strings.Index(progressOutput, "linking launcher"); noticeIndex < 0 || linkIndex < 0 || noticeIndex >= linkIndex {
+		t.Fatalf("XZ duration notice was not emitted before linking: %q", progressOutput)
 	}
 
 	cacheRoot, launcherEnvironment := packedLauncherTestCache(root, runtime.GOOS)

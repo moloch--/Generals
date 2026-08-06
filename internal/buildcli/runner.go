@@ -22,10 +22,11 @@ type command struct {
 }
 
 type runner struct {
-	dryRun bool
-	stdin  io.Reader
-	stdout io.Writer
-	stderr io.Writer
+	dryRun     bool
+	stdin      io.Reader
+	stdout     io.Writer
+	stderr     io.Writer
+	hideWindow bool
 }
 
 // GeneralsX @build Codex 04/08/2026 Execute tools directly without shell interpolation or credential logging.
@@ -43,6 +44,7 @@ func (r runner) run(ctx context.Context, spec command) error {
 	cmd.Stdin = r.stdin
 	cmd.Stdout = r.stdout
 	cmd.Stderr = r.stderr
+	configureBackgroundCommand(cmd, r.hideWindow)
 	if err := runManagedCommand(ctx, cmd); err != nil {
 		return fmt.Errorf("run %s: %w", filepath.Base(spec.name), err)
 	}
@@ -61,6 +63,7 @@ func (r runner) output(ctx context.Context, spec command) (string, error) {
 	var stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
+	configureBackgroundCommand(cmd, r.hideWindow)
 	if err := runManagedCommand(ctx, cmd); err != nil {
 		detail := strings.TrimSpace(stderr.String())
 		if detail != "" {

@@ -225,6 +225,16 @@ export function BuildStatus({
           </Alert>
         ) : null}
 
+        {isActive && error ? (
+          <Alert status="warning">
+            <Alert.Indicator />
+            <Alert.Content>
+              <Alert.Title>Build action needs attention</Alert.Title>
+              <Alert.Description>{error}</Alert.Description>
+            </Alert.Content>
+          </Alert>
+        ) : null}
+
         {state === "cancelled" ? (
           <Alert status="warning">
             <Alert.Indicator />

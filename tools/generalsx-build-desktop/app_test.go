@@ -111,8 +111,10 @@ func TestStartBuildStreamsStructuredProgressAndLogs(t *testing.T) {
 	recorder := newEventRecorder()
 	app, request, dependencies := testApp(t, recorder)
 	var capturedArguments []string
+	var capturedOptions buildcli.RunOptions
 	dependencies.builder = func(_ context.Context, arguments []string, _ io.Reader, stdout, stderr io.Writer, options buildcli.RunOptions) int {
 		capturedArguments = append([]string(nil), arguments...)
+		capturedOptions = options
 		options.Reporter.Report(buildcli.ProgressEvent{Phase: buildcli.ProgressPhaseSource, Message: "Preparing source"})
 		fmt.Fprintln(stdout, "source output")
 		fmt.Fprintln(stderr, "source warning")
@@ -139,6 +141,9 @@ func TestStartBuildStreamsStructuredProgressAndLogs(t *testing.T) {
 	if !slices.Equal(capturedArguments, buildRequestArguments(request)) {
 		t.Fatalf("arguments = %q", capturedArguments)
 	}
+	if !capturedOptions.HideBackgroundWindows {
+		t.Fatal("desktop builder did not request hidden background Windows commands")
+	}
 	streams := map[string]bool{}
 	sawVerification := false
 	for _, event := range recorder.snapshot() {
@@ -162,6 +167,98 @@ func TestStartBuildStreamsStructuredProgressAndLogs(t *testing.T) {
 	}
 }
 
+// GeneralsX @test Codex 05/08/2026 Recover exact completion even when streamed terminal delivery is blocked or missed.
+func TestWaitForBuildReturnsDurableTerminalResultBeforeAndAfterCompletion(t *testing.T) {
+	t.Parallel()
+	recorder := newEventRecorder()
+	app, request, dependencies := testApp(t, recorder)
+	started := make(chan struct{})
+	releaseBuilder := make(chan struct{})
+	terminalEmissionStarted := make(chan struct{})
+	releaseTerminalEmission := make(chan struct{})
+	terminalEmissionFinished := make(chan struct{})
+	t.Cleanup(func() {
+		select {
+		case <-releaseTerminalEmission:
+		default:
+			close(releaseTerminalEmission)
+		}
+	})
+	dependencies.emit = func(ctx context.Context, name string, payload interface{}) {
+		if progress, ok := payload.(ProgressEvent); ok && isTerminalStatus(progress.Status) {
+			close(terminalEmissionStarted)
+			<-releaseTerminalEmission
+			close(terminalEmissionFinished)
+			return
+		}
+		recorder.emit(ctx, name, payload)
+	}
+	dependencies.builder = func(_ context.Context, _ []string, _ io.Reader, _, _ io.Writer, options buildcli.RunOptions) int {
+		options.Reporter.Report(buildcli.ProgressEvent{Phase: buildcli.ProgressPhaseComplete, Message: "Complete"})
+		if err := os.WriteFile(request.Output, []byte("verified SFX"), 0o700); err != nil {
+			t.Errorf("write source artifact: %v", err)
+			return 1
+		}
+		close(started)
+		<-releaseBuilder
+		return 0
+	}
+	app.dependencies = *dependencies
+
+	jobID, err := app.StartBuild(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	<-started
+	type waitResult struct {
+		progress ProgressEvent
+		err      error
+	}
+	waited := make(chan waitResult, 1)
+	go func() {
+		progress, waitErr := app.WaitForBuild(jobID)
+		waited <- waitResult{progress: progress, err: waitErr}
+	}()
+	select {
+	case result := <-waited:
+		t.Fatalf("WaitForBuild returned before completion: %#v, %v", result.progress, result.err)
+	case <-time.After(25 * time.Millisecond):
+	}
+	close(releaseBuilder)
+	select {
+	case <-terminalEmissionStarted:
+	case <-time.After(time.Second):
+		t.Fatal("terminal event emission did not start")
+	}
+	var result waitResult
+	select {
+	case result = <-waited:
+	case <-time.After(time.Second):
+		t.Fatal("WaitForBuild remained blocked behind terminal event emission")
+	}
+	if result.err != nil || result.progress.Status != "success" || result.progress.Phase != "complete" || result.progress.Percent != 100 {
+		t.Fatalf("WaitForBuild() = %#v, %v", result.progress, result.err)
+	}
+	replayed, err := app.WaitForBuild(jobID)
+	if err != nil || replayed != result.progress {
+		t.Fatalf("replayed WaitForBuild() = %#v, %v, want %#v", replayed, err, result.progress)
+	}
+	for _, event := range recorder.snapshot() {
+		if progress, ok := event.payload.(ProgressEvent); ok && isTerminalStatus(progress.Status) {
+			t.Fatalf("terminal event was not dropped by the fixture: %#v", progress)
+		}
+	}
+	if _, err := app.WaitForBuild("unknown-job"); err == nil {
+		t.Fatal("WaitForBuild accepted an unknown job ID")
+	}
+	close(releaseTerminalEmission)
+	select {
+	case <-terminalEmissionFinished:
+	case <-time.After(time.Second):
+		t.Fatal("terminal event emission did not finish")
+	}
+}
+
 func TestStartBuildAllowsOnlyOneJobAndCancellationUsesStableEventContext(t *testing.T) {
 	t.Parallel()
 	recorder := newEventRecorder()
@@ -175,7 +272,8 @@ func TestStartBuildAllowsOnlyOneJobAndCancellationUsesStableEventContext(t *test
 	}
 	app.dependencies = *dependencies
 
-	if _, err := app.StartBuild(request); err != nil {
+	jobID, err := app.StartBuild(request)
+	if err != nil {
 		t.Fatal(err)
 	}
 	<-started
@@ -191,6 +289,10 @@ func TestStartBuildAllowsOnlyOneJobAndCancellationUsesStableEventContext(t *test
 	final := recorder.waitForProgress(t, "cancelled")
 	if final.ExitCode != 1 {
 		t.Fatalf("cancelled progress = %#v", final)
+	}
+	durable, err := app.WaitForBuild(jobID)
+	if err != nil || durable != final {
+		t.Fatalf("durable cancelled progress = %#v, %v, want %#v", durable, err, final)
 	}
 	for _, event := range recorder.snapshot() {
 		if event.name == progressEventName && event.ctxErr != nil {
@@ -577,6 +679,10 @@ func TestSuccessfulBuilderWithoutArtifactReportsFailure(t *testing.T) {
 	progress := recorder.waitForProgress(t, "error")
 	if !strings.Contains(progress.Message, "could not be verified") {
 		t.Fatalf("terminal progress = %#v", progress)
+	}
+	durable, err := app.WaitForBuild(jobID)
+	if err != nil || durable != progress {
+		t.Fatalf("durable error progress = %#v, %v, want %#v", durable, err, progress)
 	}
 	if _, err := app.CopyBuildArtifactToDesktop(jobID); err == nil {
 		t.Fatal("missing artifact became eligible for Desktop copying")

@@ -72,4 +72,6 @@ func (app application) runInteractive(ctx context.Context, spec command, purpose
 type RunOptions struct {
 	Reporter          Reporter
 	InteractiveRunner InteractiveCommandRunner
+	// GeneralsX @bugfix Codex 05/08/2026 Hide only noninteractive Windows children launched by a graphical frontend.
+	HideBackgroundWindows bool
 }
