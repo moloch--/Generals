@@ -195,7 +195,10 @@ func TestRuntimeDownloadCacheAndLocalAssembly(t *testing.T) {
 func TestPrebuiltProducedRuntimeEndToEnd(t *testing.T) {
 	metadataPath := os.Getenv("GX_TEST_RUNTIME_DESCRIPTOR")
 	archivePath := os.Getenv("GX_TEST_RUNTIME_ARCHIVE")
-	if metadataPath == "" || archivePath == "" {
+	// After publication, opt in to the normal unauthenticated GitHub download
+	// path instead of seeding the cache from the local CI archive.
+	fetchRelease := os.Getenv("GX_TEST_RUNTIME_FETCH") == "1"
+	if metadataPath == "" || (!fetchRelease && archivePath == "") {
 		t.Skip("set GX_TEST_RUNTIME_DESCRIPTOR and GX_TEST_RUNTIME_ARCHIVE to exercise a produced native runtime")
 	}
 	metadata, err := os.ReadFile(metadataPath)
@@ -236,25 +239,30 @@ func TestPrebuiltProducedRuntimeEndToEnd(t *testing.T) {
 	if buildTarget == targetWindows {
 		output += ".exe"
 	}
-	app := application{cfg: config{buildMode: "prebuilt", runtimeOffline: true, runtimeRepository: d.Repository, runtimeVersion: d.Version, target: buildTarget, assetsDir: assets, cacheDir: cache, output: output, onlineEndpoint: defaultOnlineEndpoint, skipAssets: true}, hostOS: runtime.GOOS, hostArch: runtime.GOARCH, runner: runner{stdout: &logs, stderr: &logs}}
+	app := application{cfg: config{buildMode: "prebuilt", runtimeOffline: !fetchRelease, runtimeRepository: d.Repository, runtimeVersion: d.Version, target: buildTarget, assetsDir: assets, cacheDir: cache, output: output, onlineEndpoint: defaultOnlineEndpoint, skipAssets: true}, hostOS: runtime.GOOS, hostArch: runtime.GOARCH, runner: runner{stdout: &logs, stderr: &logs}}
 	if buildTarget == targetMacOS {
 		app.cfg.appOutput = filepath.Join(root, "output", "GeneralsXZH.app")
 	}
 	if err := app.validateHostTarget(); err != nil {
 		t.Fatal(err)
 	}
-	cachePath, err := app.runtimeCache(d.Version)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(cachePath, "release.json"), metadata, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := copyAssemblyFile(context.Background(), archivePath, filepath.Join(cachePath, d.Archive.SHA256+".tar.gz"), 0o600); err != nil {
-		t.Fatal(err)
+	if !fetchRelease {
+		cachePath, err := app.runtimeCache(d.Version)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(cachePath, "release.json"), metadata, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := copyAssemblyFile(context.Background(), archivePath, filepath.Join(cachePath, d.Archive.SHA256+".tar.gz"), 0o600); err != nil {
+			t.Fatal(err)
+		}
 	}
 	if err := app.run(context.Background()); err != nil {
 		t.Fatalf("end-to-end packaging failed: %v\n%s", err, logs.String())
+	}
+	if !strings.Contains(logs.String(), d.SourceCommit) || !strings.Contains(logs.String(), d.Archive.SHA256) {
+		t.Fatal("assembled runtime identity differs from expected descriptor")
 	}
 	if info, err := os.Stat(app.cfg.output); err != nil || info.Size() == 0 {
 		t.Fatalf("missing final SFX: %v", err)

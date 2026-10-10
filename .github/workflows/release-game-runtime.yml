@@ -298,6 +298,15 @@ jobs:
             'Native Zero Hour engines and redistributable runtime dependencies for the Automated Build Tool.' \
             '' 'Targets: Linux x86_64, macOS arm64 (15.0+), exploratory Windows x86.' \
             'No retail game assets are included. Combine with your owned assets locally.' \
+            '' 'Use a builder containing PLAN-024 support:' \
+            '```sh' \
+            "generalsx-build --headless --build-mode prebuilt --runtime-repo $GH_REPO --runtime-version $RUNTIME_VERSION --skip-assets --assets-dir /path/to/GeneralsZH" \
+            '```' \
+            '' 'Local packaging requires Go 1.25+; macOS also needs Xcode Command Line Tools for the launcher helper.' \
+            'Windows needs the original x86 binkw32.dll and mss32.dll from your owned installation.' \
+            'The JSON descriptors record exact source, dependency identity, minimum OS/libc, and archive/file hashes.' \
+            'CI verifies every runtime archive and assembles a native installer with synthetic assets; it does not exercise retail gameplay.' \
+            "[Build tool usage guide](https://github.com/$GH_REPO/blob/$SOURCE_COMMIT/docs/HOWTO/AUTOMATED_SFX_BUILD.md#use-a-prebuilt-runtime)" \
             "Source: $SOURCE_COMMIT" > "$notes"
           gh release create "$RUNTIME_VERSION" --verify-tag --draft --latest=false \
             --title "GeneralsX game runtime $RUNTIME_VERSION" --notes-file "$notes"
