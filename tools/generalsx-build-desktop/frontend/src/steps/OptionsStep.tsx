@@ -1,4 +1,5 @@
 import {Button} from "@heroui/react/button";
+import {Alert} from "@heroui/react/alert";
 import {Card} from "@heroui/react/card";
 import {Description} from "@heroui/react/description";
 import {Disclosure} from "@heroui/react/disclosure";
@@ -8,6 +9,7 @@ import {TextField} from "@heroui/react/textfield";
 
 import {PathField} from "../components/PathField";
 import {SwitchSetting} from "../components/SwitchSetting";
+import {prebuiltOnlineEndpoint} from "../lib/request";
 import type {BuildRequest, BuildRequestUpdater, DirectoryKind} from "../types";
 
 interface OptionsStepProps {
@@ -16,44 +18,71 @@ interface OptionsStepProps {
   onBrowse: (kind: DirectoryKind) => void;
 }
 
+// GeneralsX @feature Codex 10/10/2026 Expose released runtime selection and the remaining local packaging requirements.
 export function OptionsStep({request, onUpdate, onBrowse}: OptionsStepProps) {
+  const prebuilt = request.buildMode === "prebuilt";
   return (
     <Card className="w-full">
       <Card.Header>
         <Card.Title>Configure the Build</Card.Title>
         <Card.Description>
-          Defaults favor a complete native client build. Open advanced settings only when you need to reuse local work.
+          {prebuilt ? "Choose a published runtime to assemble with your owned files locally." : "Defaults favor a complete native client build. Open advanced settings only when you need to reuse local work."}
         </Card.Description>
       </Card.Header>
       <Card.Content className="space-y-6">
+        {prebuilt ? (
+          <>
+            <TextField className="max-w-xl">
+              <Label>Runtime release</Label>
+              <Input
+                placeholder="stable or runtime-v1.0.0"
+                value={request.runtimeVersion}
+                variant="secondary"
+                onChange={(event) => onUpdate("runtimeVersion", event.target.value)}
+              />
+              <Description>Stable selects the newest stable runtime release when the build starts. Use an exact tag to repeat a build.</Description>
+            </TextField>
+            <Alert status="accent">
+              <Alert.Indicator />
+              <Alert.Content>
+                <Alert.Title>Download the engine, package locally</Alert.Title>
+                <Alert.Description>
+                  Install Go 1.25 or newer before packaging; macOS also needs the Xcode Command Line Tools for a small launcher helper.
+                  The published Online endpoint is {prebuiltOnlineEndpoint}. Use Build from source to save a different
+                  endpoint or bundle an Online server. Missing releases produce an error so you can choose another release or build method.
+                </Alert.Description>
+              </Alert.Content>
+            </Alert>
+          </>
+        ) : null}
         <div className="grid gap-x-8 gap-y-5 lg:grid-cols-2">
           <SwitchSetting
-            description="Install missing host tools when required; approval prompts open in a native terminal."
+            description={prebuilt ? "Allow installation of SteamCMD prerequisites for asset downloads. Install Go separately before packaging." : "Install missing host tools when required; approval prompts open in a native terminal."}
             isSelected={request.installDeps}
-            label="Install missing dependencies"
+            label={prebuilt ? "Install SteamCMD prerequisites" : "Install missing dependencies"}
             onChange={(selected) => onUpdate("installDeps", selected)}
           />
-          <SwitchSetting
+          {!prebuilt ? <SwitchSetting
             description="Include a target-native, loopback Online service sidecar."
             isSelected={request.withOnlineServer}
             label="Bundle the optional Online server"
             onChange={(selected) => onUpdate("withOnlineServer", selected)}
-          />
+          /> : null}
           <SwitchSetting
             description="Print planned external actions without changing this computer or invoking SteamCMD."
             isSelected={request.dryRun}
             label="Dry run"
             onChange={(selected) => onUpdate("dryRun", selected)}
           />
-          <SwitchSetting
+          {!prebuilt ? <SwitchSetting
             description="Required before automatic installation of applicable platform SDKs."
             isSelected={request.acceptSDKLicenses}
             label="Accept required SDK and tool licenses"
             onChange={(selected) => onUpdate("acceptSDKLicenses", selected)}
-          />
+          /> : null}
         </div>
 
-        <TextField className="max-w-xl">
+        {!prebuilt ? <TextField className="max-w-xl">
           <Label>Default Online endpoint</Label>
           <Input
             placeholder={request.withOnlineServer ? "127.0.0.1:29900" : "tls://online.example.net:29900"}
@@ -64,7 +93,7 @@ export function OptionsStep({request, onUpdate, onBrowse}: OptionsStepProps) {
           <Description>
             Optional DNS name or IPv4 address, optional port, and optional lowercase tls:// prefix.
           </Description>
-        </TextField>
+        </TextField> : null}
 
         <Disclosure>
           <Disclosure.Heading>
@@ -92,7 +121,18 @@ export function OptionsStep({request, onUpdate, onBrowse}: OptionsStepProps) {
                 />
               </div>
 
-              <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_12rem]">
+              {prebuilt ? (
+                <TextField>
+                  <Label>Runtime publisher repository</Label>
+                  <Input
+                    placeholder="OWNER/REPO"
+                    value={request.runtimeRepository}
+                    variant="secondary"
+                    onChange={(event) => onUpdate("runtimeRepository", event.target.value)}
+                  />
+                  <Description>Public GitHub repository whose runtime releases you trust.</Description>
+                </TextField>
+              ) : <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_12rem]">
                 <TextField>
                   <Label>Source repository</Label>
                   <Input
@@ -111,9 +151,9 @@ export function OptionsStep({request, onUpdate, onBrowse}: OptionsStepProps) {
                   />
                   <Description>Branch, tag, or commit.</Description>
                 </TextField>
-              </div>
+              </div>}
 
-              {request.withOnlineServer ? (
+              {!prebuilt && request.withOnlineServer ? (
                 <div className="space-y-5">
                   <PathField
                     description="Optional existing checkout; leave empty to use the managed clone."
@@ -144,19 +184,19 @@ export function OptionsStep({request, onUpdate, onBrowse}: OptionsStepProps) {
               ) : null}
 
               <div className="grid gap-x-8 gap-y-5 lg:grid-cols-2">
-                <SwitchSetting
+                {!prebuilt ? <SwitchSetting
                   description="Reuse the current native game build instead of recompiling."
                   isSelected={request.skipGameBuild}
                   label="Reuse existing game build"
                   onChange={(selected) => onUpdate("skipGameBuild", selected)}
-                />
+                /> : null}
                 <SwitchSetting
                   description="Fail instead of waiting for Steam Guard or installer interaction."
                   isSelected={request.nonInteractive}
                   label="Non-interactive mode"
                   onChange={(selected) => onUpdate("nonInteractive", selected)}
                 />
-                {request.target === "windows" ? (
+                {!prebuilt && request.target === "windows" ? (
                   <SwitchSetting
                     description="Keep the temporary Windows runtime stage for diagnosis."
                     isSelected={request.keepWindowsStage}

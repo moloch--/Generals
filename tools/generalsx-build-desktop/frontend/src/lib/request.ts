@@ -1,6 +1,11 @@
-import type {BuildRequest, DirectoryKind, ValidationIssue} from "../types";
+import type {BuildMode, BuildRequest, DirectoryKind, ValidationIssue} from "../types";
+
+export const prebuiltOnlineEndpoint = "tls://multiplayer.generals.network";
 
 export const emptyBuildRequest: BuildRequest = {
+  buildMode: "source",
+  runtimeRepository: "moloch--/Generals",
+  runtimeVersion: "stable",
   repoRoot: "",
   sourceRepo: "https://github.com/moloch--/Generals.git",
   sourceRef: "main",
@@ -26,6 +31,8 @@ export const emptyBuildRequest: BuildRequest = {
 };
 
 const stringFields = [
+  "runtimeRepository",
+  "runtimeVersion",
   "repoRoot",
   "sourceRepo",
   "sourceRef",
@@ -40,6 +47,24 @@ const stringFields = [
   "onlineServerRef",
   "onlineEndpoint",
 ] as const satisfies readonly (keyof BuildRequest)[];
+
+// GeneralsX @feature Codex 10/10/2026 Apply the published runtime's supported options when the user selects it.
+export function selectBuildMode(request: BuildRequest, buildMode: BuildMode, hostOS: string): BuildRequest {
+  if (buildMode === "source") {
+    return {...request, buildMode};
+  }
+  return {
+    ...request,
+    buildMode,
+    target: request.target === "linux" && hostOS !== "linux" ? "auto" : request.target,
+    withOnlineServer: false,
+    onlineServerSource: "",
+    onlineEndpoint: prebuiltOnlineEndpoint,
+    skipGameBuild: false,
+    acceptSDKLicenses: false,
+    keepWindowsStage: false,
+  };
+}
 
 export function normalizeBuildRequest(request: BuildRequest): BuildRequest {
   const normalized = {...request};
@@ -87,13 +112,18 @@ export function validateWizardStep(
   hostOS = "",
 ): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
+  const prebuilt = request.buildMode === "prebuilt";
+
+  if (step === 0 && !["source", "prebuilt"].includes(request.buildMode)) {
+    issues.push({field: "buildMode", message: "Choose a build method."});
+  }
 
   if (step === 0 && !["auto", "macos", "linux", "windows"].includes(request.target)) {
     issues.push({field: "target", message: "Choose a supported build target."});
   }
 
   if (step === 1) {
-    if (!request.repoRoot.trim()) {
+    if (!prebuilt && !request.repoRoot.trim()) {
       issues.push({field: "repoRoot", message: "Choose a source checkout or clone destination."});
     }
     if (!request.assetsDir.trim()) {
@@ -107,8 +137,22 @@ export function validateWizardStep(
   }
 
   if (step === 2) {
-    if (!request.sourceRepo.trim() || !request.sourceRef.trim()) {
+    if (!prebuilt && (!request.sourceRepo.trim() || !request.sourceRef.trim())) {
       issues.push({field: "sourceRepo", message: "Source repository and ref are required."});
+    }
+    if (prebuilt) {
+      if (!/^[a-zA-Z0-9][a-zA-Z0-9_.-]*\/[a-zA-Z0-9][a-zA-Z0-9_.-]*$/.test(request.runtimeRepository.trim())) {
+        issues.push({field: "runtimeRepository", message: "Use a public GitHub runtime repository in OWNER/REPO form."});
+      }
+      if (!/^(?:stable|runtime-v\d+\.\d+\.\d+(?:-[a-zA-Z0-9][a-zA-Z0-9.-]*)?)$/.test(request.runtimeVersion.trim())) {
+        issues.push({field: "runtimeVersion", message: "Choose stable or an exact runtime-vX.Y.Z release tag."});
+      }
+      if (request.onlineEndpoint.trim() && request.onlineEndpoint.trim() !== prebuiltOnlineEndpoint) {
+        issues.push({field: "onlineEndpoint", message: "Saving a custom Online endpoint requires Build from source."});
+      }
+      if (request.withOnlineServer || request.skipGameBuild) {
+        issues.push({field: "buildMode", message: "Bundling a server or reusing a local game build requires Build from source."});
+      }
     }
     if (!isOnlineEndpointValid(request.onlineEndpoint.trim())) {
       issues.push({

@@ -441,12 +441,19 @@ func (a *App) reportBuilderProgress(ctx context.Context, job *activeBuild, event
 	})
 }
 
+// GeneralsX @feature Codex 10/10/2026 Show download, assembly, and verification progress for released runtimes.
 func phasePercent(phase string) int {
 	switch phase {
 	case "preflight":
 		return 5
 	case "source":
 		return 15
+	case "runtime-resolve":
+		return 10
+	case "runtime-download":
+		return 20
+	case "runtime-verify":
+		return 35
 	case "toolchain":
 		return 30
 	case "assets":
@@ -455,7 +462,11 @@ func phasePercent(phase string) int {
 		return 65
 	case "build":
 		return 75
-	case "verify":
+	case "assemble":
+		return 65
+	case "package":
+		return 80
+	case "verify", "verify-output":
 		return 95
 	case "complete":
 		return 100

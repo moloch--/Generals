@@ -6,6 +6,8 @@ import {
   isMacOSBuild,
   normalizeBuildRequest,
   primaryArtifactPath,
+  prebuiltOnlineEndpoint,
+  selectBuildMode,
   validateWizardStep,
 } from "./request";
 
@@ -33,6 +35,41 @@ describe("normalizeBuildRequest", () => {
     expect(normalized.steamUser).toBe("commander");
     expect(keys).not.toContain("steamPassword");
     expect(keys).not.toContain("steamGuardCode");
+  });
+});
+
+describe("prebuilt mode", () => {
+  it("keeps source as the default and clears incompatible options when selected", () => {
+    expect(emptyBuildRequest.buildMode).toBe("source");
+    const source = {...emptyBuildRequest, target: "linux" as const, withOnlineServer: true, skipGameBuild: true,
+      onlineEndpoint: "tls://private.example.net", acceptSDKLicenses: true, keepWindowsStage: true};
+    const prebuilt = selectBuildMode(source, "prebuilt", "darwin");
+    expect(prebuilt).toMatchObject({buildMode: "prebuilt", target: "auto", withOnlineServer: false,
+      skipGameBuild: false, onlineEndpoint: prebuiltOnlineEndpoint, acceptSDKLicenses: false, keepWindowsStage: false});
+    expect(source.withOnlineServer).toBe(true);
+    expect(selectBuildMode(prebuilt, "source", "darwin").buildMode).toBe("source");
+  });
+
+  it("requires local assets and output without requiring a source checkout", () => {
+    const request = {...emptyBuildRequest, buildMode: "prebuilt" as const, sourceRepo: "", sourceRef: ""};
+    expect(validateWizardStep(1, request, false, "linux").map((issue) => issue.field)).toEqual(["assetsDir", "output"]);
+    expect(validateWizardStep(2, request)).toEqual([]);
+  });
+
+  it("validates release selectors and prevents source-only customization", () => {
+    const request = {...emptyBuildRequest, buildMode: "prebuilt" as const};
+    for (const runtimeVersion of ["stable", "runtime-v1.2.3", "runtime-v1.2.3-rc.1"]) {
+      expect(validateWizardStep(2, {...request, runtimeVersion})).toEqual([]);
+    }
+    for (const runtimeVersion of ["", "main", "https://example.com/payload", "../runtime-v1.2.3"]) {
+      expect(validateWizardStep(2, {...request, runtimeVersion})).toContainEqual(expect.objectContaining({field: "runtimeVersion"}));
+    }
+    expect(validateWizardStep(2, {...request, runtimeRepository: "https://github.com/a/b"}))
+      .toContainEqual(expect.objectContaining({field: "runtimeRepository"}));
+    expect(validateWizardStep(2, {...request, onlineEndpoint: "tls://private.example.net"}))
+      .toContainEqual(expect.objectContaining({field: "onlineEndpoint"}));
+    expect(validateWizardStep(2, {...request, withOnlineServer: true}))
+      .toContainEqual(expect.objectContaining({field: "buildMode"}));
   });
 });
 

@@ -13,6 +13,10 @@ import (
 
 // BuildRequest mirrors the public generalsx-build flags without accepting any secret.
 type BuildRequest struct {
+	// GeneralsX @feature Codex 10/10/2026 Select a released engine without a local source build.
+	BuildMode          string `json:"buildMode"`
+	RuntimeRepository  string `json:"runtimeRepository"`
+	RuntimeVersion     string `json:"runtimeVersion"`
 	RepoRoot           string `json:"repoRoot"`
 	SourceRepo         string `json:"sourceRepo"`
 	SourceRef          string `json:"sourceRef"`
@@ -56,6 +60,9 @@ func (a *App) GetDefaults() (DesktopDefaults, error) {
 		return DesktopDefaults{}, err
 	}
 	request := BuildRequest{
+		BuildMode:          defaults.BuildMode,
+		RuntimeRepository:  defaults.RuntimeRepository,
+		RuntimeVersion:     defaults.RuntimeVersion,
 		RepoRoot:           defaults.RepositoryRoot,
 		SourceRepo:         defaults.SourceRepository,
 		SourceRef:          defaults.SourceReference,
@@ -99,9 +106,15 @@ func targetForHost(hostOS string) string {
 
 // GeneralsX @bugfix Codex 05/08/2026 Keep the hidden macOS raw launcher on its safe deterministic intermediate path.
 func normalizeDesktopBuildRequest(request BuildRequest, hostOS string) BuildRequest {
+	if request.BuildMode == "" {
+		request.BuildMode = "source"
+	}
 	target, err := resolveTarget(request.Target, hostOS)
 	if err == nil && target == "macos" {
 		request.Output = filepath.Join(request.RepoRoot, "build", "sfx", "GeneralsXZH-macos-arm64-sfx")
+		if request.BuildMode == "prebuilt" && request.AppOutput != "" {
+			request.Output = filepath.Join(filepath.Dir(request.AppOutput), "GeneralsXZH-macos-arm64-sfx")
+		}
 	}
 	return request
 }
@@ -117,19 +130,29 @@ func (a *App) ValidateBuild(request BuildRequest) []ValidationIssue {
 		issues = append(issues, ValidationIssue{Field: field, Message: message, Severity: "warning"})
 	}
 
-	for _, required := range []struct {
+	prebuilt := request.BuildMode == "prebuilt"
+	if request.BuildMode != "source" && !prebuilt {
+		errorIssue("buildMode", "Choose Download prebuilt game or Build from source.")
+	}
+	requiredFields := []struct {
 		field string
 		value string
 	}{
-		{field: "repoRoot", value: request.RepoRoot},
-		{field: "sourceRepo", value: request.SourceRepo},
-		{field: "sourceRef", value: request.SourceRef},
 		{field: "target", value: request.Target},
 		{field: "assetsDir", value: request.AssetsDir},
 		{field: "cacheDir", value: request.CacheDir},
-		{field: "onlineServerRepo", value: request.OnlineServerRepo},
-		{field: "onlineServerRef", value: request.OnlineServerRef},
-	} {
+	}
+	if prebuilt {
+		requiredFields = append(requiredFields, struct{ field, value string }{"runtimeRepository", request.RuntimeRepository}, struct{ field, value string }{"runtimeVersion", request.RuntimeVersion})
+	} else {
+		requiredFields = append(requiredFields,
+			struct{ field, value string }{"repoRoot", request.RepoRoot},
+			struct{ field, value string }{"sourceRepo", request.SourceRepo},
+			struct{ field, value string }{"sourceRef", request.SourceRef},
+			struct{ field, value string }{"onlineServerRepo", request.OnlineServerRepo},
+			struct{ field, value string }{"onlineServerRef", request.OnlineServerRef})
+	}
+	for _, required := range requiredFields {
 		if strings.TrimSpace(required.value) == "" {
 			errorIssue(required.field, "This value is required.")
 		}
@@ -138,7 +161,11 @@ func (a *App) ValidateBuild(request BuildRequest) []ValidationIssue {
 	resolvedTarget, targetErr := resolveTarget(request.Target, a.dependencies.hostOS)
 	if targetErr != nil {
 		errorIssue("target", targetErr.Error())
-	} else if err := validateHostTarget(resolvedTarget, a.dependencies.hostOS, a.dependencies.hostArch); err != nil {
+	} else if prebuilt && ((resolvedTarget == "linux" && (a.dependencies.hostOS != "linux" || a.dependencies.hostArch != "amd64")) ||
+		(resolvedTarget == "macos" && (a.dependencies.hostOS != "darwin" || a.dependencies.hostArch != "arm64")) ||
+		(resolvedTarget == "windows" && (a.dependencies.hostOS != "windows" || a.dependencies.hostArch != "amd64"))) {
+		errorIssue("target", "Prebuilt game assembly requires a matching native host: Linux x86-64, macOS Apple Silicon, or Windows x86-64.")
+	} else if err := validateHostTarget(resolvedTarget, a.dependencies.hostOS, a.dependencies.hostArch); !prebuilt && err != nil {
 		errorIssue("target", err.Error())
 	}
 	if resolvedTarget == "macos" && request.AppOutput != "" && !strings.HasSuffix(strings.ToLower(request.AppOutput), ".app") {
@@ -147,11 +174,27 @@ func (a *App) ValidateBuild(request BuildRequest) []ValidationIssue {
 	if resolvedTarget == "windows" && request.Output != "" && !strings.HasSuffix(strings.ToLower(request.Output), ".exe") {
 		errorIssue("output", "Windows SFX output must end in .exe.")
 	}
+	if prebuilt {
+		if resolvedTarget == "macos" && strings.TrimSpace(request.AppOutput) == "" {
+			errorIssue("appOutput", "Choose a macOS application output path.")
+		} else if resolvedTarget != "macos" && strings.TrimSpace(request.Output) == "" {
+			errorIssue("output", "Choose an SFX output path.")
+		}
+		if request.SkipGameBuild {
+			errorIssue("skipGameBuild", "Reusing a local game build requires Build from source.")
+		}
+		if request.WithOnlineServer {
+			errorIssue("withOnlineServer", "Bundling the Online server requires Build from source.")
+		}
+		if request.OnlineEndpoint != "" && request.OnlineEndpoint != "tls://multiplayer.generals.network" {
+			errorIssue("onlineEndpoint", "Prebuilt games use tls://multiplayer.generals.network. Saving a custom endpoint requires Build from source.")
+		}
+	}
 
-	if err := validateRemoteAndRef("source", request.SourceRepo, request.SourceRef); err != nil {
+	if err := validateRemoteAndRef("source", request.SourceRepo, request.SourceRef); !prebuilt && err != nil {
 		errorIssue("sourceRepo", err.Error())
 	}
-	if err := validateRemoteAndRef("Online server", request.OnlineServerRepo, request.OnlineServerRef); err != nil {
+	if err := validateRemoteAndRef("Online server", request.OnlineServerRepo, request.OnlineServerRef); !prebuilt && err != nil {
 		errorIssue("onlineServerRepo", err.Error())
 	}
 	if request.OnlineEndpoint != "" {
@@ -165,7 +208,7 @@ func (a *App) ValidateBuild(request BuildRequest) []ValidationIssue {
 	if !request.SkipAssets && request.NonInteractive && !request.DryRun {
 		warningIssue("nonInteractive", "The build will fail if the selected retail assets are incomplete because Steam authentication is interactive.")
 	}
-	if request.AcceptSDKLicenses && !request.InstallDeps {
+	if !prebuilt && request.AcceptSDKLicenses && !request.InstallDeps {
 		warningIssue("acceptSDKLicenses", "SDK license acceptance has no effect while dependency installation is disabled.")
 	}
 
@@ -338,6 +381,9 @@ func addPathOverlapIssues(request BuildRequest, addIssue func(string, string)) {
 		}{field: "output", path: filepath.Dir(request.Output), text: "SFX output directory must not overlap the retail asset tree."})
 	}
 	for _, check := range checks {
+		if request.BuildMode == "prebuilt" && (check.field == "repoRoot" || check.field == "onlineServerSource") {
+			continue
+		}
 		if check.path != "" && desktopPathsOverlap(request.AssetsDir, check.path) {
 			addIssue(check.field, check.text)
 		}
@@ -375,7 +421,31 @@ func resolveDesktopPath(path string) string {
 }
 
 func buildRequestArguments(request BuildRequest) []string {
+	// GeneralsX @feature Codex 10/10/2026 Keep hidden source settings out of the prebuilt CLI contract.
+	if request.BuildMode == "prebuilt" {
+		if request.OnlineEndpoint == "" {
+			request.OnlineEndpoint = "tls://multiplayer.generals.network"
+		}
+		return []string{
+			"--build-mode=prebuilt",
+			"--runtime-repo=" + request.RuntimeRepository,
+			"--runtime-version=" + request.RuntimeVersion,
+			"--target=" + request.Target,
+			"--assets-dir=" + request.AssetsDir,
+			"--steam-user=" + request.SteamUser,
+			"--cache-dir=" + request.CacheDir,
+			"--steamcmd-dir=" + request.SteamCMDDir,
+			"--output=" + request.Output,
+			"--app-output=" + request.AppOutput,
+			"--install-deps=" + strconv.FormatBool(request.InstallDeps),
+			"--online-endpoint=" + request.OnlineEndpoint,
+			"--skip-assets=" + strconv.FormatBool(request.SkipAssets),
+			"--dry-run=" + strconv.FormatBool(request.DryRun),
+			"--non-interactive=" + strconv.FormatBool(request.NonInteractive),
+		}
+	}
 	return []string{
+		"--build-mode=source",
 		"--repo=" + request.RepoRoot,
 		"--source-repo=" + request.SourceRepo,
 		"--source-ref=" + request.SourceRef,

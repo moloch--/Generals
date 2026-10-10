@@ -4,9 +4,10 @@ import {Chip} from "@heroui/react/chip";
 import {Description} from "@heroui/react/description";
 import {Label} from "@heroui/react/label";
 
-import type {BuildRequestUpdater, BuildTarget} from "../types";
+import type {BuildMode, BuildRequestUpdater, BuildTarget} from "../types";
 
 interface TargetStepProps {
+  buildMode: BuildMode;
   hostOS: string;
   hostArch: string;
   target: BuildTarget;
@@ -45,10 +46,11 @@ const targets: Array<{
   },
 ];
 
-export function TargetStep({hostOS, hostArch, target, onUpdate}: TargetStepProps) {
+// GeneralsX @feature Codex 10/10/2026 Offer downloaded runtimes alongside the existing source workflow.
+export function TargetStep({buildMode, hostOS, hostArch, target, onUpdate}: TargetStepProps) {
   const supportedTargets = new Set<BuildTarget>(
     hostOS === "darwin" && hostArch === "arm64"
-      ? ["auto", "macos", "linux"]
+      ? buildMode === "prebuilt" ? ["auto", "macos"] : ["auto", "macos", "linux"]
       : hostOS === "windows"
         ? ["auto", "windows"]
         : ["auto", "linux"],
@@ -59,10 +61,34 @@ export function TargetStep({hostOS, hostArch, target, onUpdate}: TargetStepProps
       <Card.Header>
         <Card.Title>Choose a Build Target</Card.Title>
         <Card.Description>
-          Native builds are the reliable path. The automatic choice resolves to {hostOS || "this host"}/{hostArch || "native"}.
+          The automatic choice matches this computer: {hostOS || "this host"}/{hostArch || "native"}.
         </Card.Description>
       </Card.Header>
-      <Card.Content>
+      <Card.Content className="space-y-6">
+        <RadioButtonGroup
+          aria-label="Build method"
+          className="grid-cols-1 sm:grid-cols-2"
+          layout="grid"
+          name="build-mode"
+          value={buildMode}
+          variant="secondary"
+          onChange={(value) => onUpdate("buildMode", value as BuildMode)}
+        >
+          <RadioButtonGroup.Item value="prebuilt">
+            <RadioButtonGroup.Indicator />
+            <RadioButtonGroup.ItemContent>
+              <Label>Download prebuilt game</Label>
+              <Description>Download a published runtime and combine it with your owned files. No engine compilation.</Description>
+            </RadioButtonGroup.ItemContent>
+          </RadioButtonGroup.Item>
+          <RadioButtonGroup.Item value="source">
+            <RadioButtonGroup.Indicator />
+            <RadioButtonGroup.ItemContent>
+              <Label>Build from source</Label>
+              <Description>Compile your checkout with local changes and custom engine settings.</Description>
+            </RadioButtonGroup.ItemContent>
+          </RadioButtonGroup.Item>
+        </RadioButtonGroup>
         <RadioButtonGroup
           aria-label="Build target"
           className="grid-cols-1 sm:grid-cols-2"

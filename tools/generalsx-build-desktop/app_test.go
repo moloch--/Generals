@@ -447,18 +447,19 @@ func TestChooseDirectoryUsesFieldKindsAndOutputDirectorySemantics(t *testing.T) 
 	t.Parallel()
 	recorder := newEventRecorder()
 	app, _, dependencies := testApp(t, recorder)
+	outputDirectory, selectedDirectory := t.TempDir(), t.TempDir()
 	dependencies.chooseDirectory = func(_ context.Context, options wailsruntime.OpenDialogOptions) (string, error) {
-		if options.DefaultDirectory != "/tmp/output" {
+		if options.DefaultDirectory != outputDirectory {
 			t.Fatalf("default directory = %q", options.DefaultDirectory)
 		}
 		if !strings.Contains(options.Title, "SFX output") {
 			t.Fatalf("title = %q", options.Title)
 		}
-		return "/chosen", nil
+		return selectedDirectory, nil
 	}
 	app.dependencies = *dependencies
-	selected, err := app.ChooseDirectory("output", "/tmp/output/game-sfx")
-	if err != nil || selected != "/chosen" {
+	selected, err := app.ChooseDirectory("output", filepath.Join(outputDirectory, "game-sfx"))
+	if err != nil || selected != selectedDirectory {
 		t.Fatalf("ChooseDirectory() = %q, %v", selected, err)
 	}
 	if _, err := app.ChooseDirectory("unknown", ""); err == nil {
@@ -472,7 +473,7 @@ func TestCopyBuildArtifactToDesktopCopiesOnlyTheMatchingSuccessfulBuild(t *testi
 	app, request, dependencies := testApp(t, recorder)
 	desktop := t.TempDir()
 	sourceDirectory := t.TempDir()
-	request.Output = filepath.Join(sourceDirectory, "GeneralsXZH-sfx")
+	request.Output = filepath.Join(sourceDirectory, filepath.Base(request.Output))
 	payload := []byte("verified SFX fixture")
 	dependencies.desktopDirectory = func() (string, error) { return desktop, nil }
 	dependencies.builder = func(_ context.Context, _ []string, _ io.Reader, _, _ io.Writer, _ buildcli.RunOptions) int {
@@ -504,7 +505,9 @@ func TestCopyBuildArtifactToDesktopCopiesOnlyTheMatchingSuccessfulBuild(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := filepath.Join(desktop, "GeneralsXZH-sfx (1)"); destination != want {
+	outputName := filepath.Base(request.Output)
+	extension := filepath.Ext(outputName)
+	if want := filepath.Join(desktop, strings.TrimSuffix(outputName, extension)+" (1)"+extension); destination != want {
 		t.Fatalf("destination = %q, want %q", destination, want)
 	}
 	contents, err := os.ReadFile(destination)
@@ -722,7 +725,7 @@ func TestCopyBuildArtifactToDesktopRejectsDryRunAndFailure(t *testing.T) {
 			recorder := newEventRecorder()
 			app, request, dependencies := testApp(t, recorder)
 			request.DryRun = test.dryRun
-			request.Output = filepath.Join(t.TempDir(), "GeneralsXZH-sfx")
+			request.Output = filepath.Join(t.TempDir(), filepath.Base(request.Output))
 			dependencies.desktopDirectory = func() (string, error) { return t.TempDir(), nil }
 			dependencies.builder = func(_ context.Context, _ []string, _ io.Reader, _, _ io.Writer, _ buildcli.RunOptions) int {
 				return test.exitCode

@@ -20,6 +20,7 @@ import {
   applyDirectorySelection,
   emptyBuildRequest,
   normalizeBuildRequest,
+  selectBuildMode,
   primaryArtifactPath,
   validateWizardStep,
 } from "./lib/request";
@@ -128,9 +129,11 @@ export function App() {
   }, [applyLogEvent, applyProgressEvent]);
 
   const updateRequest = useCallback<BuildRequestUpdater>((field, value) => {
-    setRequest((previous) => ({...previous, [field]: value}));
+    setRequest((previous) => field === "buildMode"
+      ? selectBuildMode(previous, value as BuildRequest["buildMode"], hostOS)
+      : {...previous, [field]: value});
     setIssues([]);
-  }, []);
+  }, [hostOS]);
 
   const browse = useCallback(async (kind: DirectoryKind) => {
     try {
@@ -281,7 +284,7 @@ export function App() {
         ) : defaultsError ? null : (
           <>
             {currentStep === 0 ? (
-              <TargetStep hostArch={hostArch} hostOS={hostOS} target={request.target} onUpdate={updateRequest} />
+              <TargetStep buildMode={request.buildMode} hostArch={hostArch} hostOS={hostOS} target={request.target} onUpdate={updateRequest} />
             ) : null}
             {currentStep === 1 ? (
               <GameFilesStep

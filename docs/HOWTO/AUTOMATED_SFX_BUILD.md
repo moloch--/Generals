@@ -1,4 +1,4 @@
-# Automated GeneralsXZH Source, Asset, and SFX Build
+# Automated GeneralsXZH Runtime, Asset, and SFX Build
 
 ## Desktop app (preferred)
 
@@ -9,8 +9,8 @@ Windows/AMD64 desktop `.exe`. After downloading a direct macOS or Linux
 executable, run `chmod +x PATH` before starting it. The three desktop builds
 present the same guided flow:
 
-1. choose a target supported by this build host;
-2. select an existing source checkout or automatic clone destination;
+1. choose a target and either **Build from source** or **Download prebuilt game**;
+2. choose a runtime release, or an existing source checkout or clone destination;
 3. select owned retail data or ask SteamCMD to download it;
 4. choose dependency, output, and optional Online server settings;
 5. review the plan and personal-use data boundary, then start the build.
@@ -18,8 +18,13 @@ present the same guided flow:
 The app validates each step before it starts and shows the shared builder's
 real phase, terminal output, cancellation state, and final artifact path. It
 does not contain game data. Tagged releases distribute only the Automated Build
-Tool, its headless companion, checksums, and licensing files; they never attach
-a user-generated game SFX or macOS game app.
+Tool, its headless companion, checksums, and licensing files. Separate
+`runtime-vX.Y.Z` releases distribute engines and redistributable dependencies.
+Neither release type contains a user-generated game SFX or retail game assets.
+
+Source mode remains the default while runtime releases are rolled out. Prebuilt
+mode becomes usable once a compatible runtime release has been published; the
+tool reports a missing release without silently switching to compilation.
 
 After a real build completes, select **Copy to Desktop** to publish the primary
 personal game artifact through a temporary sibling without overwriting an
@@ -68,7 +73,7 @@ installation, and Linux package-manager commands that need administrator
 approval open in a native terminal and return control to the same GUI build.
 Noninteractive dependency commands continue to stream their output in the app.
 
-Each release attaches a dependency-light `generalsx-build` headless companion
+Each Automated Build Tool release attaches a dependency-light `generalsx-build` headless companion
 as a separate platform download. The desktop executable itself also accepts
 `--headless` and the same flags when started from a terminal. Check any download
 against the separately attached `SHA256SUMS`; `LICENSE.md` and
@@ -109,6 +114,11 @@ licensed frontend/native packaging jobs.
 
 ## What the command does
 
+The default `--build-mode source` performs the source-build sequence below.
+For a published engine, use `--build-mode prebuilt` as described in the next
+section. Both modes acquire owned assets locally and create the same personal
+SFX output (plus a Finder-ready app on macOS).
+
 `generalsx-build` turns a fresh macOS, Linux, or Windows development machine
 into a target-native personal GeneralsXZH self-extracting executable. Go is the
 bootstrap entrypoint, so Go 1.25 or newer is the only separately installed
@@ -137,6 +147,85 @@ submodules are still synchronized, initialized, and checked out at the commits
 recorded by that superproject; Git refuses a checkout that would overwrite
 conflicting local submodule edits. A clone destination that already exists but
 is not a complete GeneralsX checkout is rejected.
+
+## Use a prebuilt runtime
+
+After the first runtime release is published, select **Download prebuilt game**
+in the desktop app, or run the headless companion:
+
+```sh
+generalsx-build --headless --build-mode prebuilt \
+  --runtime-version stable --skip-assets --assets-dir /path/to/GeneralsZH
+```
+
+To download owned data with SteamCMD, omit `--skip-assets` and supply
+`--steam-user YOUR_STEAM_ACCOUNT`. Authentication stays in the local terminal.
+Windows requires the original x86 `binkw32.dll` and `mss32.dll` alongside the
+retail data; runtime releases deliberately exclude them.
+
+`stable` selects the most recently published non-preview runtime release from
+`moloch--/Generals`, independently of Automated Build Tool releases. Selection
+happens when the build starts. The log records the exact tag, source commit,
+and SHA-256; the packaged game includes a `generalsx-runtime.json` receipt.
+Use an exact tag to reproduce a selection:
+
+```sh
+generalsx-build --headless --build-mode prebuilt \
+  --runtime-version runtime-v1.0.0 --skip-assets --assets-dir /path/to/GeneralsZH
+```
+
+The example tag must exist. Archives are cached by publisher, release, target,
+and digest and verified again before reuse. For an already cached version,
+add `--runtime-offline`; offline mode requires an exact tag and never resolves
+`stable`. Combine it with complete local assets and `--skip-assets` to avoid
+SteamCMD downloads too. Go may still need its packaging-module dependencies
+on the first packaging run; `--runtime-offline` applies to runtime retrieval.
+
+Prebuilt packaging requires the native host: Linux AMD64, macOS ARM64, or
+Windows AMD64. The Windows game remains x86 inside an AMD64 launcher.
+The descriptor enforces the release's measured glibc requirement on Linux,
+macOS 15.0 minimum, and Windows 10.0 minimum. Linux also needs its normal Vulkan
+GPU driver at play time.
+
+The engine, libraries, dependency relocation, and runtime validation are built
+in GitHub Actions. Locally, this version still requires **Go 1.25+** to build
+the SFX launcher, and **Xcode Command Line Tools on macOS** for the small
+progress helper. An installed `xz` speeds compression; a Go fallback is
+available. No engine C++ build, CMake, vcpkg, Docker, or Vulkan build SDK is
+prepared by prebuilt mode. Asset copying, hashing, and compression still run
+locally and remain substantial work for a full game installation.
+
+Prebuilt mode uses the published Online endpoint. Custom compiled settings,
+local engine changes, and the optional Online server sidecar require source
+mode. `--repo`, source-ref/source-repo overrides, `--skip-game-build`, and
+`--keep-windows-stage` are rejected with prebuilt mode. A game launch can still
+override the server with `-onlineServer`. Source mode remains available with
+`--build-mode source`.
+
+Only change `--runtime-repo OWNER/REPO` to a publisher you trust: its runtime
+and matching packaging code execute locally. Downloads require HTTPS,
+descriptor and architecture checks, archive and per-file SHA-256 checks, and
+bounded extraction. Checksums detect changed content; they are not a separate
+publisher signature. The builder stages assets privately, verifies the final
+SFX, and restores previous outputs if publication fails. Desktop cleanup keeps
+the reusable runtime cache and does not claim an unrelated source checkout.
+
+### Produce and publish runtime releases
+
+`.github/workflows/release-game-runtime.yml` builds Linux, macOS, and Windows
+engines on native runners. Main-branch changes and manual dispatches produce
+temporary Actions artifacts. A new `runtime-vX.Y.Z` tag builds all three
+targets and publishes one complete runtime release only after every target
+and archive passes validation. These tags are separate from builder `vX.Y.Z`
+releases. Existing runtime releases are never overwritten; use a new version.
+
+Each target publishes a JSON descriptor and a `.tar.gz` containing the runtime
+and its matching small packaging kit. `SHA256SUMS` covers all six assets.
+The publisher verifies the exact source commit and each extracted file before
+promoting the draft release. No Steam credentials or retail installation are
+required by this workflow. Native clean-machine gameplay and replay testing
+remain release validation steps; packaging tests do not establish gameplay
+compatibility.
 
 ## Legal and credential boundary
 

@@ -15,13 +15,16 @@ interface ReviewStepProps {
 }
 
 function enabledOptions(request: BuildRequest): string[] {
+  const prebuilt = request.buildMode === "prebuilt";
   const options = [
-    request.installDeps ? "Install dependencies" : "Existing toolchain",
+    request.installDeps ? (prebuilt ? "Install SteamCMD prerequisites" : "Install dependencies") : (prebuilt ? "Existing prerequisites" : "Existing toolchain"),
     request.skipAssets ? "Existing retail files" : "SteamCMD acquisition",
     request.withOnlineServer ? "Bundled Online server" : "Client only",
     request.dryRun ? "Dry run" : "Create artifact",
   ];
-  if (request.onlineEndpoint) {
+  if (prebuilt) {
+    options.push("Published Online endpoint");
+  } else if (request.onlineEndpoint) {
     options.push("Custom Online endpoint");
   }
   if (request.skipGameBuild) {
@@ -30,6 +33,7 @@ function enabledOptions(request: BuildRequest): string[] {
   return options;
 }
 
+// GeneralsX @feature Codex 10/10/2026 Review the selected runtime publisher and version before local assembly.
 export function ReviewStep({
   hostOS,
   request,
@@ -40,6 +44,7 @@ export function ReviewStep({
   const errors = issues.filter((issue) => issue.severity !== "warning");
   const warnings = issues.filter((issue) => issue.severity === "warning");
   const buildsMacOSApplication = isMacOSBuild(request.target, hostOS);
+  const prebuilt = request.buildMode === "prebuilt";
 
   return (
     <div className="space-y-6">
@@ -55,8 +60,12 @@ export function ReviewStep({
               <dd className="mt-1 text-sm font-medium">{targetLabel(request.target)}</dd>
             </div>
             <div>
-              <dt className="text-xs font-medium text-muted">Source</dt>
-              <dd className="mt-1 break-all text-sm">{request.repoRoot}</dd>
+              <dt className="text-xs font-medium text-muted">Build method</dt>
+              <dd className="mt-1 text-sm">{prebuilt ? "Download prebuilt game" : "Build from source"}</dd>
+            </div>
+            <div>
+              <dt className="text-xs font-medium text-muted">{prebuilt ? "Runtime release" : "Source"}</dt>
+              <dd className="mt-1 break-all text-sm">{prebuilt ? `${request.runtimeRepository} · ${request.runtimeVersion}` : request.repoRoot}</dd>
             </div>
             <div>
               <dt className="text-xs font-medium text-muted">Owned retail data</dt>
@@ -69,6 +78,13 @@ export function ReviewStep({
               <dd className="mt-1 break-all text-sm">{primaryArtifactPath(request, hostOS)}</dd>
             </div>
           </dl>
+          {prebuilt ? (
+            <p className="text-sm text-muted">
+              The build resolves this release and records its exact version and checksum in the log and build receipt.
+              It verifies the download before combining it with local retail files. Go packaging still runs locally;
+              macOS also compiles a small launcher helper.
+            </p>
+          ) : null}
 
           <div className="flex flex-wrap gap-2">
             {enabledOptions(request).map((option) => (
@@ -115,7 +131,7 @@ export function ReviewStep({
             <Alert.Content>
               <Alert.Title>The finished artifact contains copyrighted retail game data</Alert.Title>
               <Alert.Description>
-                Keep it private and use it only with files you legally own. Do not commit, upload, publish, or redistribute the artifact. GeneralsX source is GPLv3 software provided without warranty; the source checkout includes the complete license and EA additional terms.
+                Keep it private and use it only with files you legally own. Do not commit, upload, publish, or redistribute the artifact. GeneralsX is GPLv3 software provided without warranty; the source and runtime distribution include the license and EA additional terms.
               </Alert.Description>
             </Alert.Content>
           </Alert>

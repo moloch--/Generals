@@ -45,6 +45,47 @@ func TestBuildCleanupFreshRootsPreserveDesktopAndAssets(t *testing.T) {
 	cleanupAssertFileContents(t, assetSentinel, []byte("retail data"))
 }
 
+func TestPrebuiltCleanupPreservesSourceAndCacheFromEarlierJob(t *testing.T) {
+	base := t.TempDir()
+	ledgerPath := filepath.Join(base, "private-state", "cleanup-ownership-v1.json")
+	request := cleanupTestRequest(base)
+	sourceSnapshot := snapshotBuildCleanupWithOwnership(request, runtime.GOOS, ledgerPath)
+	cleanupCreateSimulatedRepo(t, request.RepoRoot)
+	cacheFile := filepath.Join(request.CacheDir, "downloads", "dependency.zip")
+	cleanupWriteFile(t, cacheFile, []byte("cached"), 0o600)
+	priorReceipt := finalizeBuildCleanup("earlier-source-job", sourceSnapshot)
+	if err := persistBuildCleanupOwnership(priorReceipt, true); err != nil {
+		t.Fatal(err)
+	}
+
+	request.BuildMode = "prebuilt"
+	request.Output = filepath.Join(base, "output", "game-sfx")
+	snapshot := snapshotBuildCleanupWithOwnership(request, runtime.GOOS, ledgerPath)
+	if len(snapshot.candidates) != 1 || snapshot.candidates[0].path != request.Output {
+		t.Fatalf("prebuilt snapshot claimed unrelated files: %#v", snapshot.candidates)
+	}
+	cleanupWriteFile(t, request.Output, []byte("new SFX"), 0o700)
+	desktop := cleanupTestArtifact(t, "prebuilt-job", filepath.Join(base, "Desktop", "game-sfx"), []byte("new SFX"))
+	receipt := finalizeBuildCleanup("prebuilt-job", snapshot)
+	if err := persistBuildCleanupOwnership(receipt, true); err != nil {
+		t.Fatal(err)
+	}
+	plan, prepared, err := prepareBuildCleanup(receipt, desktop)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.Entries) != 1 || plan.Entries[0].Path != request.Output {
+		t.Fatalf("prebuilt plan claimed unrelated files: %#v", plan.Entries)
+	}
+	if _, err := executeBuildCleanup(context.Background(), prepared); err != nil {
+		t.Fatal(err)
+	}
+	cleanupAssertNotExist(t, request.Output)
+	cleanupAssertFileContents(t, filepath.Join(request.RepoRoot, "tracked.txt"), []byte("tracked"))
+	cleanupAssertFileContents(t, cacheFile, []byte("cached"))
+	cleanupAssertFileContents(t, desktop.sourcePath, []byte("new SFX"))
+}
+
 func TestBuildCleanupPreservesPreexistingRoots(t *testing.T) {
 	base := t.TempDir()
 	request := cleanupTestRequest(base)
@@ -526,8 +567,7 @@ func TestBuildCleanupOwnershipLedgerTamperFailsClosedAcrossRestart(t *testing.T)
 }
 
 func TestBuildCleanupDefaultCachePreservesUnknownSibling(t *testing.T) {
-	home := filepath.Join(t.TempDir(), "home")
-	t.Setenv("HOME", home)
+	cleanupIsolateDefaultWorkspace(t)
 	_, defaultCache, err := cleanupCanonicalDefaultWorkspacePaths()
 	if err != nil {
 		t.Fatal(err)
@@ -579,8 +619,7 @@ func TestBuildCleanupDefaultCachePreservesUnknownSibling(t *testing.T) {
 }
 
 func TestBuildCleanupAdoptsOnlyCleanDetachedDefaultBuilderClone(t *testing.T) {
-	home := filepath.Join(t.TempDir(), "home")
-	t.Setenv("HOME", home)
+	cleanupIsolateDefaultWorkspace(t)
 	defaultRepo, _, err := cleanupCanonicalDefaultWorkspacePaths()
 	if err != nil {
 		t.Fatal(err)
@@ -829,6 +868,17 @@ func TestBuildCleanupSnapshotUsesEffectiveDefaultsAndManagedChildren(t *testing.
 			t.Errorf("snapshot missing %s", path)
 		}
 	}
+}
+
+// GeneralsX @bugfix Codex 10/10/2026 Isolate cleanup fixtures from real Windows and XDG builder directories.
+func cleanupIsolateDefaultWorkspace(t *testing.T) {
+	t.Helper()
+	fixtureHome := filepath.Join(t.TempDir(), "home")
+	fixtureCache := filepath.Join(fixtureHome, "cache")
+	t.Setenv("HOME", fixtureHome)
+	t.Setenv("USERPROFILE", fixtureHome)
+	t.Setenv("LOCALAPPDATA", fixtureCache)
+	t.Setenv("XDG_CACHE_HOME", fixtureCache)
 }
 
 func cleanupTestRequest(base string) BuildRequest {

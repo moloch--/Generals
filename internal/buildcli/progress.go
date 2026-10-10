@@ -4,13 +4,19 @@ package buildcli
 type ProgressPhase string
 
 const (
-	ProgressPhasePreflight    ProgressPhase = "preflight"
-	ProgressPhaseSource       ProgressPhase = "source"
-	ProgressPhaseToolchain    ProgressPhase = "toolchain"
-	ProgressPhaseAssets       ProgressPhase = "assets"
-	ProgressPhaseOnlineServer ProgressPhase = "online-server"
-	ProgressPhaseBuild        ProgressPhase = "build"
-	ProgressPhaseComplete     ProgressPhase = "complete"
+	ProgressPhasePreflight       ProgressPhase = "preflight"
+	ProgressPhaseSource          ProgressPhase = "source"
+	ProgressPhaseToolchain       ProgressPhase = "toolchain"
+	ProgressPhaseAssets          ProgressPhase = "assets"
+	ProgressPhaseOnlineServer    ProgressPhase = "online-server"
+	ProgressPhaseBuild           ProgressPhase = "build"
+	ProgressPhaseComplete        ProgressPhase = "complete"
+	ProgressPhaseRuntimeResolve  ProgressPhase = "runtime-resolve"
+	ProgressPhaseRuntimeDownload ProgressPhase = "runtime-download"
+	ProgressPhaseRuntimeVerify   ProgressPhase = "runtime-verify"
+	ProgressPhaseAssemble        ProgressPhase = "assemble"
+	ProgressPhasePackage         ProgressPhase = "package"
+	ProgressPhaseVerifyOutput    ProgressPhase = "verify-output"
 )
 
 // GeneralsX @feature Codex 05/08/2026 Report structured phases without coupling the builder to a UI toolkit.

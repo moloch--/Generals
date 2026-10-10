@@ -1,6 +1,10 @@
 export type BuildTarget = "auto" | "macos" | "linux" | "windows";
+export type BuildMode = "source" | "prebuilt";
 
 export interface BuildRequest {
+  buildMode: BuildMode;
+  runtimeRepository: string;
+  runtimeVersion: string;
   repoRoot: string;
   sourceRepo: string;
   sourceRef: string;
@@ -102,7 +106,7 @@ export type ExecutionState =
 
 export const wizardSteps = [
   {title: "Target", description: "Choose the native platform"},
-  {title: "Game Files", description: "Source, retail data, and output"},
+  {title: "Game Files", description: "Owned retail data and output"},
   {title: "Options", description: "Select build behavior"},
   {title: "Review", description: "Confirm ownership and build"},
 ] as const;

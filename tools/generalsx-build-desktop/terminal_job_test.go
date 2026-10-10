@@ -19,6 +19,7 @@ import (
 func TestTerminalInteractiveRunnerUsesPrivateSpecAndPreservesArguments(t *testing.T) {
 	t.Parallel()
 	var observedSpecPath string
+	desktopExecutable := filepath.Join(t.TempDir(), "GeneralsX Build Tool")
 	command := buildcli.InteractiveCommand{
 		Purpose:          buildcli.InteractiveSteamAuthentication,
 		Executable:       "/private/steam cmd",
@@ -27,10 +28,10 @@ func TestTerminalInteractiveRunnerUsesPrivateSpecAndPreservesArguments(t *testin
 		Environment:      map[string]string{"FIXTURE": "value with spaces"},
 	}
 	runner := &terminalInteractiveRunner{
-		executablePath: func() (string, error) { return "/Applications/GeneralsX Build Tool", nil },
+		executablePath: func() (string, error) { return desktopExecutable, nil },
 		launcher: func(_ context.Context, executable, specPath string) error {
 			observedSpecPath = specPath
-			if executable != "/Applications/GeneralsX Build Tool" {
+			if executable != desktopExecutable {
 				t.Fatalf("desktop executable = %q", executable)
 			}
 			info, err := os.Stat(specPath)

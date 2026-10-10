@@ -169,7 +169,16 @@ func snapshotBuildCleanupWithOwnership(request BuildRequest, hostOS, ownershipLe
 		return snapshot
 	}
 	snapshot.target = target
-	repo, err := cleanupCanonicalFuturePath(request.RepoRoot)
+	prebuilt := request.BuildMode == "prebuilt"
+	repoRoot := request.RepoRoot
+	if prebuilt {
+		// GeneralsX @bugfix Codex 10/10/2026 Prebuilt cleanup never claims a checkout, build tree, or shared cache.
+		if request.Output == "" {
+			return snapshot
+		}
+		repoRoot = filepath.Dir(request.Output)
+	}
+	repo, err := cleanupCanonicalFuturePath(repoRoot)
 	if err != nil {
 		return snapshot
 	}
@@ -248,6 +257,16 @@ func snapshotBuildCleanupWithOwnership(request BuildRequest, hostOS, ownershipLe
 	}
 	if request.WithOnlineServer {
 		raw = append(raw, cleanupRawCandidate{"Bundled Online server build", filepath.Join(repo, "build", "bootstrap", "online-server", cleanupServerTarget(target)), cleanupDirectory, cleanupMarkerInside, cleanupGeneratedOutput})
+	}
+	if prebuilt {
+		snapshot.repoPath, snapshot.cachePath, snapshot.sourceRepo = "", "", ""
+		snapshot.defaultRepo, snapshot.defaultCache = false, false
+		raw = []cleanupRawCandidate{
+			{"Raw SFX output", output, cleanupRegularFile, cleanupMarkerSidecar, cleanupGeneratedOutput},
+		}
+		if target == "macos" && request.AppOutput != "" {
+			raw = append(raw, cleanupRawCandidate{"macOS app bundle", request.AppOutput, cleanupDirectory, cleanupMarkerSidecar, cleanupGeneratedOutput})
+		}
 	}
 
 	seen := make(map[string]struct{}, len(raw))
@@ -328,7 +347,7 @@ func snapshotBuildCleanupWithOwnership(request BuildRequest, hostOS, ownershipLe
 			nearestParentPath: parentPath, nearestParentInfo: parentInfo,
 		})
 	}
-	if ledgerErr == nil && ledger != nil {
+	if !prebuilt && ledgerErr == nil && ledger != nil {
 		for index := range ledger.Records {
 			record := &ledger.Records[index]
 			key := cleanupPathKey(record.Path)

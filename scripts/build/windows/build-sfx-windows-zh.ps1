@@ -37,6 +37,10 @@ Reuse the existing win32-vcpkg Release game output.
 .PARAMETER KeepStage
 Retain the private Windows runtime stage after packaging for diagnosis.
 
+.PARAMETER RuntimeOutputDirectory
+Export only redistributable engine/runtime files into a new directory for CI.
+This mode never reads retail assets or builds a Go launcher.
+
 .NOTES
 Run from an x64-hosted Visual Studio x86 developer environment. Required tools
 are detected but never installed by this script.
@@ -49,7 +53,8 @@ param(
     [string]$OnlineServerBinary,
     [string[]]$RuntimeSearchDirectory = @(),
     [switch]$SkipGameBuild,
-    [switch]$KeepStage
+    [switch]$KeepStage,
+    [string]$RuntimeOutputDirectory
 )
 
 Set-StrictMode -Version Latest
@@ -93,6 +98,9 @@ function Invoke-CheckedNativeCommand {
 }
 
 function Import-VisualStudioX86Environment {
+    # GeneralsX @build Codex 10/10/2026 VsDevCmd may inject its bundled vcpkg;
+    # retain the explicitly selected/pinned checkout used by the caller.
+    $requestedVcpkgRoot = $env:VCPKG_ROOT
     $vswherePath = $env:GX_VSWHERE
     if ([string]::IsNullOrWhiteSpace($vswherePath)) {
         $vswhereCommand = Get-Command 'vswhere.exe' -ErrorAction SilentlyContinue
@@ -132,6 +140,9 @@ function Import-VisualStudioX86Environment {
         if ($text -match '^([^=]+)=(.*)$') {
             [Environment]::SetEnvironmentVariable($Matches[1], $Matches[2], 'Process')
         }
+    }
+    if (-not [string]::IsNullOrWhiteSpace($requestedVcpkgRoot)) {
+        $env:VCPKG_ROOT = $requestedVcpkgRoot
     }
 }
 
@@ -335,8 +346,9 @@ function Copy-WindowsDependencyClosure {
     param(
         [Parameter(Mandatory = $true)][string]$Stage,
         [Parameter(Mandatory = $true)][string]$GameExecutable,
-        [Parameter(Mandatory = $true)][string]$RetailBink,
-        [Parameter(Mandatory = $true)][string]$RetailMiles
+        [string]$RetailBink,
+        [string]$RetailMiles,
+        [switch]$RedistributableOnly
     )
 
     $retailDependencies = @{
@@ -351,8 +363,15 @@ function Copy-WindowsDependencyClosure {
     )
     $queue = [Collections.Generic.Queue[string]]::new()
     $queue.Enqueue($GameExecutable)
-    $queue.Enqueue($RetailBink)
-    $queue.Enqueue($RetailMiles)
+    # GeneralsX @build Codex 10/10/2026 Share closure inspection between local
+    # retail packaging and CI exports, without ever resolving generated stubs.
+    if (-not $RedistributableOnly) {
+        if ([string]::IsNullOrWhiteSpace($RetailBink) -or [string]::IsNullOrWhiteSpace($RetailMiles)) {
+            throw 'Retail Bink and Miles paths are required for local SFX packaging.'
+        }
+        $queue.Enqueue($RetailBink)
+        $queue.Enqueue($RetailMiles)
+    }
 
     # These are the documented Release runtime requirements for win32-vcpkg.
     foreach ($requiredName in @(
@@ -374,7 +393,9 @@ function Copy-WindowsDependencyClosure {
         }
         foreach ($dependency in (Get-PeDependencies -Path $current)) {
             if ($retailDependencies.ContainsKey($dependency)) {
-                $queue.Enqueue([string]$retailDependencies[$dependency])
+                if (-not $RedistributableOnly) {
+                    $queue.Enqueue([string]$retailDependencies[$dependency])
+                }
                 continue
             }
             if (Test-WindowsSystemDependency -Name $dependency -Architecture x86) {
@@ -406,6 +427,12 @@ $script:SfxModule = Join-Path $projectRoot 'scripts\tooling\sfx'
 $script:BuildDirectory = Join-Path $projectRoot 'build\win32-vcpkg'
 $gameBuildDirectory = Join-Path $script:BuildDirectory 'GeneralsMD\Release'
 $gameBuildExecutable = Join-Path $gameBuildDirectory 'generalszh.exe'
+$exportRuntime = -not [string]::IsNullOrWhiteSpace($RuntimeOutputDirectory)
+if ($exportRuntime -and (-not [string]::IsNullOrWhiteSpace($AssetDirectory) -or
+    -not [string]::IsNullOrWhiteSpace($Output) -or
+    -not [string]::IsNullOrWhiteSpace($OnlineServerBinary) -or $KeepStage)) {
+    throw 'Runtime export cannot be combined with retail/SFX output or server options.'
+}
 
 # Winget may install these tools after the parent process captured PATH.
 Add-ProcessPathDirectory -Directory (Join-Path $env:ProgramFiles 'CMake\bin')
@@ -440,42 +467,44 @@ if (-not [string]::IsNullOrWhiteSpace($env:GX_WINDOWS_RUNTIME_DIRS)) {
     )
 }
 
-$assetRoot = Resolve-ExistingDirectory -Path $AssetDirectory -Label 'Retail asset directory'
-if (-not [IO.Path]::IsPathRooted($Output)) {
-    $Output = Join-Path $projectRoot $Output
-}
-$outputPath = [IO.Path]::GetFullPath($Output)
-if ([IO.Path]::GetExtension($outputPath) -ine '.exe') {
-    throw "Windows SFX output must end in .exe: $outputPath"
-}
-$outputDirectory = Split-Path -Parent $outputPath
-if (Test-DirectoriesOverlap -First $assetRoot -Second $outputDirectory) {
-    throw "SFX output directory may not overlap the retail asset tree."
-}
-if ($null -ne (Get-Item -LiteralPath $outputPath -Force -ErrorAction SilentlyContinue)) {
-    [void](Resolve-RegularFile -Path $outputPath -Label 'SFX output')
-}
-New-Item -ItemType Directory -Path $outputDirectory -Force | Out-Null
-$outputDirectory = Resolve-ExistingDirectory -Path $outputDirectory -Label 'SFX output directory'
+if (-not $exportRuntime) {
+    $assetRoot = Resolve-ExistingDirectory -Path $AssetDirectory -Label 'Retail asset directory'
+    if (-not [IO.Path]::IsPathRooted($Output)) {
+        $Output = Join-Path $projectRoot $Output
+    }
+    $outputPath = [IO.Path]::GetFullPath($Output)
+    if ([IO.Path]::GetExtension($outputPath) -ine '.exe') {
+        throw "Windows SFX output must end in .exe: $outputPath"
+    }
+    $outputDirectory = Split-Path -Parent $outputPath
+    if (Test-DirectoriesOverlap -First $assetRoot -Second $outputDirectory) {
+        throw "SFX output directory may not overlap the retail asset tree."
+    }
+    if ($null -ne (Get-Item -LiteralPath $outputPath -Force -ErrorAction SilentlyContinue)) {
+        [void](Resolve-RegularFile -Path $outputPath -Label 'SFX output')
+    }
+    New-Item -ItemType Directory -Path $outputDirectory -Force | Out-Null
+    $outputDirectory = Resolve-ExistingDirectory -Path $outputDirectory -Label 'SFX output directory'
 
-$assetReparsePoint = Get-ChildItem -LiteralPath $assetRoot -Recurse -Force |
-    Where-Object { ($_.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 } |
-    Select-Object -First 1
-if ($null -ne $assetReparsePoint) {
-    throw "Windows SFX assets may not contain symlinks or reparse points: $($assetReparsePoint.FullName)"
+    $assetReparsePoint = Get-ChildItem -LiteralPath $assetRoot -Recurse -Force |
+        Where-Object { ($_.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 } |
+        Select-Object -First 1
+    if ($null -ne $assetReparsePoint) {
+        throw "Windows SFX assets may not contain symlinks or reparse points: $($assetReparsePoint.FullName)"
+    }
+    $bigAsset = Get-ChildItem -LiteralPath $assetRoot -Force -File |
+        Where-Object { $_.Extension -ieq '.big' } |
+        Select-Object -First 1
+    if ($null -eq $bigAsset) {
+        throw "No top-level Zero Hour .big assets were found in $assetRoot"
+    }
+    $retailBinkSource = Get-TopLevelFile -Directory $assetRoot -Name 'binkw32.dll' -Label 'Retail asset directory'
+    $retailMilesSource = Get-TopLevelFile -Directory $assetRoot -Name 'mss32.dll' -Label 'Retail asset directory'
+    Assert-PeMachine -Path $retailBinkSource -Expected 0x014C -Description 'Retail Windows/x86 Bink runtime'
+    Assert-PeMachine -Path $retailMilesSource -Expected 0x014C -Description 'Retail Windows/x86 Miles runtime'
+    $retailBinkHash = (Get-FileHash -LiteralPath $retailBinkSource -Algorithm SHA256).Hash
+    $retailMilesHash = (Get-FileHash -LiteralPath $retailMilesSource -Algorithm SHA256).Hash
 }
-$bigAsset = Get-ChildItem -LiteralPath $assetRoot -Force -File |
-    Where-Object { $_.Extension -ieq '.big' } |
-    Select-Object -First 1
-if ($null -eq $bigAsset) {
-    throw "No top-level Zero Hour .big assets were found in $assetRoot"
-}
-$retailBinkSource = Get-TopLevelFile -Directory $assetRoot -Name 'binkw32.dll' -Label 'Retail asset directory'
-$retailMilesSource = Get-TopLevelFile -Directory $assetRoot -Name 'mss32.dll' -Label 'Retail asset directory'
-Assert-PeMachine -Path $retailBinkSource -Expected 0x014C -Description 'Retail Windows/x86 Bink runtime'
-Assert-PeMachine -Path $retailMilesSource -Expected 0x014C -Description 'Retail Windows/x86 Miles runtime'
-$retailBinkHash = (Get-FileHash -LiteralPath $retailBinkSource -Algorithm SHA256).Hash
-$retailMilesHash = (Get-FileHash -LiteralPath $retailMilesSource -Algorithm SHA256).Hash
 
 $dumpbinCommand = Get-Command 'dumpbin.exe' -ErrorAction SilentlyContinue
 $clCommand = Get-Command 'cl.exe' -ErrorAction SilentlyContinue
@@ -487,16 +516,18 @@ if (-not [string]::IsNullOrWhiteSpace($env:GX_VSWHERE) -or
 }
 $script:DumpbinPath = Get-RequiredCommandPath -Name 'dumpbin.exe' `
     -Hint 'Run from an x64-hosted Visual Studio x86 developer environment.'
-$goPath = Get-RequiredCommandPath -Name 'go.exe' -Hint 'Install Go 1.25 or newer.'
-if ($null -eq (Get-Command 'xz.exe' -ErrorAction SilentlyContinue)) {
-    Write-Warning 'xz.exe was not found; the packer will use its slower pure-Go XZ implementation.'
-}
-$goVersion = & $goPath version
-if ($LASTEXITCODE -ne 0 -or $goVersion -notmatch 'go([0-9]+)\.([0-9]+)') {
-    throw "Unable to determine the installed Go version."
-}
-if ([int]$Matches[1] -lt 1 -or ([int]$Matches[1] -eq 1 -and [int]$Matches[2] -lt 25)) {
-    throw "Go 1.25 or newer is required; detected: $goVersion"
+if (-not $exportRuntime) {
+    $goPath = Get-RequiredCommandPath -Name 'go.exe' -Hint 'Install Go 1.25 or newer.'
+    if ($null -eq (Get-Command 'xz.exe' -ErrorAction SilentlyContinue)) {
+        Write-Warning 'xz.exe was not found; the packer will use its slower pure-Go XZ implementation.'
+    }
+    $goVersion = & $goPath version
+    if ($LASTEXITCODE -ne 0 -or $goVersion -notmatch 'go([0-9]+)\.([0-9]+)') {
+        throw "Unable to determine the installed Go version."
+    }
+    if ([int]$Matches[1] -lt 1 -or ([int]$Matches[1] -eq 1 -and [int]$Matches[2] -lt 25)) {
+        throw "Go 1.25 or newer is required; detected: $goVersion"
+    }
 }
 
 if (-not $SkipGameBuild) {
@@ -518,6 +549,9 @@ if (-not $SkipGameBuild) {
         '-DVCPKG_TARGET_TRIPLET=x86-windows',
         '-DRTS_BUILD_ZEROHOUR=ON'
     )
+    if ($exportRuntime) {
+        $configureArguments += '-DRTS_BUILD_OPTION_DEBUG=OFF'
+    }
     $onlineEndpointConfigured = $null -ne [Environment]::GetEnvironmentVariable(
         'GX_ONLINE_SERVER_DEFAULT',
         'Process'
@@ -562,6 +596,32 @@ $script:RuntimeSearchDirectories = @(
         Where-Object { Test-Path -LiteralPath $_ -PathType Container } |
         Select-Object -Unique
 )
+
+# GeneralsX @build Codex 10/10/2026 Export an asset-free runtime using the same
+# x86 dependency closure as the local packager. Never replace an existing tree.
+if ($exportRuntime) {
+    $runtimeOutput = [IO.Path]::GetFullPath($RuntimeOutputDirectory)
+    if ($null -ne (Get-Item -LiteralPath $runtimeOutput -Force -ErrorAction SilentlyContinue)) {
+        throw "Runtime export destination must not already exist: $runtimeOutput"
+    }
+    $runtimeParent = Resolve-ExistingDirectory -Path (Split-Path -Parent $runtimeOutput) `
+        -Label 'Runtime export parent'
+    $runtimeOutput = Join-Path $runtimeParent (Split-Path -Leaf $runtimeOutput)
+    if (Test-DirectoriesOverlap -First $runtimeOutput -Second $script:BuildDirectory) {
+        throw 'Runtime export must not overlap the CMake build tree.'
+    }
+    New-Item -ItemType Directory -Path $runtimeOutput | Out-Null
+    $runtimeGame = Join-Path $runtimeOutput 'generalszh.exe'
+    Copy-Item -LiteralPath $gameBuildExecutable -Destination $runtimeGame
+    Copy-WindowsDependencyClosure -Stage $runtimeOutput -GameExecutable $runtimeGame -RedistributableOnly
+    foreach ($retailName in @('binkw32.dll', 'mss32.dll')) {
+        if (Test-Path -LiteralPath (Join-Path $runtimeOutput $retailName)) {
+            throw "Retail/stub DLL entered the runtime export: $retailName"
+        }
+    }
+    Write-Host "Exported redistributable Windows/x86 runtime: $runtimeOutput"
+    return
+}
 
 $resolvedServer = $null
 if (-not [string]::IsNullOrWhiteSpace($OnlineServerBinary)) {

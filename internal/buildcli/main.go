@@ -90,6 +90,10 @@ func (app application) run(ctx context.Context) error {
 			return err
 		}
 	}
+	// GeneralsX @feature Codex 10/10/2026 Downloaded engines bypass Git, submodules, and native compiler bootstrap entirely.
+	if app.cfg.buildMode == "prebuilt" {
+		return app.runPrebuilt(ctx)
+	}
 	reportProgress(app.reporter, ProgressPhaseSource, "Preparing the GeneralsX source checkout")
 	gitPath, err := app.ensureGit(ctx)
 	if err != nil {
@@ -197,6 +201,13 @@ func validateRepository(root string) error {
 }
 
 func (app application) validateHostTarget() error {
+	if app.cfg.buildMode == "prebuilt" {
+		wantOS, wantArch := serverTarget(app.cfg.target)
+		if app.hostOS != wantOS || app.hostArch != wantArch {
+			return fmt.Errorf("prebuilt %s packaging and verification require native %s/%s; current host is %s/%s", app.cfg.target, wantOS, wantArch, app.hostOS, app.hostArch)
+		}
+		return nil
+	}
 	switch app.cfg.target {
 	case targetMacOS:
 		if app.hostOS != "darwin" || app.hostArch != "arm64" {

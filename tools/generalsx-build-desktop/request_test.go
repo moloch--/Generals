@@ -4,6 +4,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/moloch--/Generals/internal/buildcli"
@@ -75,6 +76,9 @@ func TestNormalizeDesktopBuildRequestReplacesHiddenMacOSRawOutput(t *testing.T) 
 func TestGetDefaultsMapsSharedBuilderDefaults(t *testing.T) {
 	t.Parallel()
 	wantRequest := BuildRequest{
+		BuildMode:          "source",
+		RuntimeRepository:  "moloch--/Generals",
+		RuntimeVersion:     "stable",
 		RepoRoot:           "/source",
 		SourceRepo:         "https://example.invalid/source.git",
 		SourceRef:          "v1.2.3",
@@ -103,6 +107,9 @@ func TestGetDefaultsMapsSharedBuilderDefaults(t *testing.T) {
 	dependencies.hostArch = "arm64"
 	dependencies.loadDefaults = func() (buildcli.ConfigurationDefaults, error) {
 		return buildcli.ConfigurationDefaults{
+			BuildMode:              wantRequest.BuildMode,
+			RuntimeRepository:      wantRequest.RuntimeRepository,
+			RuntimeVersion:         wantRequest.RuntimeVersion,
 			RepositoryRoot:         wantRequest.RepoRoot,
 			SourceRepository:       wantRequest.SourceRepo,
 			SourceReference:        wantRequest.SourceRef,
@@ -166,6 +173,7 @@ func TestBuildRequestArgumentsMapsEveryField(t *testing.T) {
 		KeepWindowsStage:   true,
 	}
 	want := []string{
+		"--build-mode=source",
 		"--repo=/source tree",
 		"--source-repo=https://example.invalid/source.git",
 		"--source-ref=release",
@@ -191,6 +199,89 @@ func TestBuildRequestArgumentsMapsEveryField(t *testing.T) {
 	}
 	if got := buildRequestArguments(request); !slices.Equal(got, want) {
 		t.Fatalf("arguments = %q, want %q", got, want)
+	}
+}
+
+func TestPrebuiltArgumentsExcludeHiddenSourceConfiguration(t *testing.T) {
+	t.Parallel()
+	request := BuildRequest{
+		BuildMode: "prebuilt", RuntimeRepository: "moloch--/Generals", RuntimeVersion: "runtime-v1.2.3",
+		Target: "windows", RepoRoot: "/unrelated-source", SourceRepo: "unused", SourceRef: "local-edits",
+		OnlineServerSource: "/unused-server", OnlineServerRepo: "unused", OnlineServerRef: "unused",
+		AssetsDir: "/assets", CacheDir: "/cache", Output: "/out/game.exe", SkipAssets: true,
+	}
+	arguments := buildRequestArguments(request)
+	for _, want := range []string{"--build-mode=prebuilt", "--runtime-repo=moloch--/Generals", "--runtime-version=runtime-v1.2.3", "--assets-dir=/assets", "--output=/out/game.exe"} {
+		if !slices.Contains(arguments, want) {
+			t.Errorf("missing %q in %q", want, arguments)
+		}
+	}
+	for _, argument := range arguments {
+		for _, forbidden := range []string{"--repo=", "--source-", "--online-server-", "--with-online-server=", "--skip-game-build=", "--accept-sdk-licenses=", "--keep-windows-stage="} {
+			if strings.HasPrefix(argument, forbidden) {
+				t.Errorf("prebuilt arguments contain source-only setting %q", argument)
+			}
+		}
+	}
+}
+
+func TestPrebuiltValidationDoesNotRequireOrProtectUnusedSourcePaths(t *testing.T) {
+	t.Parallel()
+	app := NewApp()
+	defaults, err := app.GetDefaults()
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := defaults.Request
+	request.BuildMode, request.SkipAssets = "prebuilt", true
+	request.SourceRepo, request.SourceRef = "", ""
+	request.OnlineServerRepo, request.OnlineServerRef = "", ""
+	request.RepoRoot, request.OnlineServerSource = request.AssetsDir, request.AssetsDir
+	if issues := app.ValidateBuild(request); hasErrorIssues(issues) {
+		t.Fatalf("valid prebuilt request issues: %#v", issues)
+	}
+	for _, test := range []struct {
+		field  string
+		change func(*BuildRequest)
+	}{
+		{"skipGameBuild", func(r *BuildRequest) { r.SkipGameBuild = true }},
+		{"withOnlineServer", func(r *BuildRequest) { r.WithOnlineServer = true }},
+		{"onlineEndpoint", func(r *BuildRequest) { r.OnlineEndpoint = "tls://custom.example.com" }},
+		{"cacheDir", func(r *BuildRequest) { r.CacheDir = r.AssetsDir }},
+	} {
+		t.Run(test.field, func(t *testing.T) {
+			invalid := request
+			test.change(&invalid)
+			if issues := app.ValidateBuild(invalid); !hasIssueField(issues, test.field) {
+				t.Fatalf("missing %s validation: %#v", test.field, issues)
+			}
+		})
+	}
+}
+
+func TestPrebuiltMacOSRawOutputUsesChosenAppDirectory(t *testing.T) {
+	t.Parallel()
+	request := BuildRequest{BuildMode: "prebuilt", Target: "macos", RepoRoot: "/unused-source", AppOutput: filepath.Join(t.TempDir(), "Game.app")}
+	normalized := normalizeDesktopBuildRequest(request, "darwin")
+	if want := filepath.Join(filepath.Dir(request.AppOutput), "GeneralsXZH-macos-arm64-sfx"); normalized.Output != want {
+		t.Fatalf("raw output = %q, want %q", normalized.Output, want)
+	}
+}
+
+func TestPrebuiltRejectsLinuxCrossPackagingOnMacOS(t *testing.T) {
+	t.Parallel()
+	dependencies := defaultAppDependencies()
+	dependencies.hostOS, dependencies.hostArch = "darwin", "arm64"
+	app := newApp(dependencies)
+	defaults, err := app.GetDefaults()
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := defaults.Request
+	request.BuildMode, request.Target = "prebuilt", "linux"
+	issues := app.ValidateBuild(request)
+	if !hasIssueField(issues, "target") {
+		t.Fatalf("non-native prebuilt packaging accepted: %#v", issues)
 	}
 }
 

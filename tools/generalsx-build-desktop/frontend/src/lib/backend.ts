@@ -164,7 +164,7 @@ function clearMockTimers(): void {
 
 function scheduleMockBuild(jobId: string, request: BuildRequest): void {
   const buildsMacOSApplication = isMacOSBuild(request.target, detectHost().hostOS);
-  const buildPhases: Array<Omit<BuildProgressEvent, "jobId"> & {log: string}> = [
+  const sourcePhases: Array<Omit<BuildProgressEvent, "jobId"> & {log: string}> = [
     {
       phase: "prepare",
       status: "running",
@@ -230,6 +230,22 @@ function scheduleMockBuild(jobId: string, request: BuildRequest): void {
       log: "Artifact checks passed. Preview build complete.",
     },
   ];
+  // GeneralsX @feature Codex 10/10/2026 Preview download and assembly phases without implying an engine compile.
+  const prebuiltPhases: typeof sourcePhases = [
+    sourcePhases[0]!,
+    {phase: "runtime-resolve", status: "running", message: "Resolving the selected runtime release", percent: 10,
+      log: `Resolving ${request.runtimeVersion} from ${request.runtimeRepository} (preview).`},
+    {phase: "runtime-download", status: "running", message: "Downloading the game runtime", percent: 20,
+      log: "Downloading the runtime and its matching packaging kit (preview)."},
+    {phase: "runtime-verify", status: "running", message: "Verifying the downloaded runtime", percent: 35,
+      log: "Runtime digest, target, and file inventory checks passed (preview)."},
+    sourcePhases[3]!,
+    {phase: "assemble", status: "running", message: "Combining the runtime with owned game files", percent: 65,
+      log: "Assembling a private copy of the runtime and retail files (preview)."},
+    {...sourcePhases[5]!, percent: 80},
+    {...sourcePhases[6]!, phase: "verify-output"},
+  ];
+  const buildPhases = request.buildMode === "prebuilt" ? prebuiltPhases : sourcePhases;
   const dryRunPhases: Array<Omit<BuildProgressEvent, "jobId"> & {log: string}> = [
     buildPhases[0]!,
     buildPhases[1]!,

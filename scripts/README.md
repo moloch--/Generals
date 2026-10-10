@@ -16,6 +16,7 @@ Scripts for Linux native and Docker-based builds:
 - `docker-build-mingw-zh.sh` - Cross-compile Windows .exe via MinGW in Docker
 - `build-linux-appimage-zh.sh` - Package GeneralsXZH as AppImage (portable single-file Linux distribution)
 - `bundle-linux-zh.sh` - Bundle compiled binaries and their complete Linux/AMD64 dependency closure
+- `export-runtime-linux-zh.sh` - Export the canonical bundle as an asset-free runtime for CI publication
 - `deploy-linux-zh.sh` - Deploy to runtime directory
 - `run-linux-zh.sh` - Launch the game windowed
 
@@ -25,13 +26,18 @@ Scripts for Linux native and Docker-based builds:
 - `build-sfx-macos-zh.sh` - Build one local macOS/ARM64 SFX and a signed Finder-launchable `.app`, validate its Mach-O closure, and inventory owned Zero Hour assets
 - `package-sfx-macos-zh-app.sh` - Wrap an existing macOS/ARM64 SFX in a signed `.app` with a complete Retina `.icns` icon
 - `bundle-macos-zh.sh` - Bundle app
+- `export-runtime-macos-zh.sh` - Export, relocate, sign, and validate an asset-free ARM64 runtime
+- `runtime-macos-zh.sh` - Shared Mach-O dependency closure validation for local SFX and CI runtime exports
 - `bundle-macos-generals.sh` - Bundle app
 - `deploy-macos-zh.sh` - Deploy binaries
 - `deploy-macos-generals.sh` - Deploy binaries
 - `run-macos-zh.sh` - Launch the game
 
-#### `build/windows/` - Windows Build (Pending)
-Reserved for modern Windows toolchain (VS2022 + SDL3 + DXVK + OpenAL)
+#### `build/windows/` - Exploratory Windows Build
+- `build-sfx-windows-zh.ps1` - Build the x86 game and local amd64 SFX; `-RuntimeOutputDirectory NEW_DIRECTORY` exports only redistributable runtime files without reading retail data
+
+`build/collect-runtime-metadata.py` records the engine configuration, dependency revisions,
+distribution package versions, measured glibc requirement, and dependency notices in CI runtime exports.
 
 ### `env/` - Environment Setup
 

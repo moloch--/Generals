@@ -17,27 +17,28 @@ interface GameFilesStepProps {
   onBrowse: (kind: DirectoryKind) => void;
 }
 
+// GeneralsX @feature Codex 10/10/2026 Collect owned assets and output without requesting an unused source checkout.
 export function GameFilesStep({hostOS, request, onUpdate, onBrowse}: GameFilesStepProps) {
   const buildsMacOSApplication = isMacOSBuild(request.target, hostOS);
 
   return (
     <Card className="w-full">
       <Card.Header>
-        <Card.Title>Locate Source and Owned Game Files</Card.Title>
+        <Card.Title>{request.buildMode === "prebuilt" ? "Locate Owned Game Files" : "Locate Source and Owned Game Files"}</Card.Title>
         <Card.Description>
-          The builder keeps source, caches, retail data, and generated output in separate locations.
+          The builder keeps caches, retail data, and generated output in separate locations.
         </Card.Description>
       </Card.Header>
       <Card.Content className="space-y-6">
         <div className="grid gap-5 lg:grid-cols-2">
-          <PathField
+          {request.buildMode === "source" ? <PathField
             description="An existing checkout or a private destination for the automatic clone."
             label="GeneralsX source"
             placeholder="~/GeneralsX/source"
             value={request.repoRoot}
             onBrowse={() => onBrowse("repoRoot")}
             onChange={(value) => onUpdate("repoRoot", value)}
-          />
+          /> : null}
           <PathField
             description="A directory containing retail Zero Hour data that you legally own."
             label="Zero Hour retail data"

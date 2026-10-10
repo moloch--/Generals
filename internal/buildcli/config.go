@@ -31,6 +31,10 @@ const (
 )
 
 type config struct {
+	buildMode          string
+	runtimeRepository  string
+	runtimeVersion     string
+	runtimeOffline     bool
 	repoRoot           string
 	sourceRepo         string
 	sourceRef          string
@@ -59,6 +63,9 @@ type config struct {
 // ConfigurationDefaults contains the host-specific values presented when no
 // command-line override is supplied.
 type ConfigurationDefaults struct {
+	BuildMode              string `json:"buildMode"`
+	RuntimeRepository      string `json:"runtimeRepository"`
+	RuntimeVersion         string `json:"runtimeVersion"`
 	RepositoryRoot         string `json:"repositoryRoot"`
 	SourceRepository       string `json:"sourceRepository"`
 	SourceReference        string `json:"sourceReference"`
@@ -109,6 +116,9 @@ func LoadConfigurationDefaults() (ConfigurationDefaults, error) {
 	}
 	cacheDirectory := filepath.Join(userCache, "GeneralsX", "builder")
 	defaults := ConfigurationDefaults{
+		BuildMode:              "source",
+		RuntimeRepository:      "moloch--/Generals",
+		RuntimeVersion:         "stable",
 		RepositoryRoot:         repositoryRoot,
 		SourceRepository:       defaultSourceRepo,
 		SourceReference:        "main",
@@ -141,6 +151,11 @@ func parseConfig(arguments []string, stderr io.Writer) (config, error) {
 	var headless bool
 	flags := flag.NewFlagSet("generalsx-build", flag.ContinueOnError)
 	flags.SetOutput(stderr)
+	// GeneralsX @feature Codex 10/10/2026 Select downloaded runtimes without changing existing source-build defaults.
+	flags.StringVar(&cfg.buildMode, "build-mode", defaults.BuildMode, "game preparation: source or prebuilt (prebuilt still packages locally with Go)")
+	flags.StringVar(&cfg.runtimeRepository, "runtime-repo", defaults.RuntimeRepository, "trusted public GitHub runtime publisher as OWNER/REPO")
+	flags.StringVar(&cfg.runtimeVersion, "runtime-version", defaults.RuntimeVersion, "runtime release: stable or an exact runtime-vX.Y.Z tag")
+	flags.BoolVar(&cfg.runtimeOffline, "runtime-offline", false, "use a verified cached exact runtime version without contacting GitHub")
 	flags.StringVar(&cfg.repoRoot, "repo", defaults.RepositoryRoot, "existing checkout or destination for an automatic clone")
 	flags.StringVar(&cfg.sourceRepo, "source-repo", defaults.SourceRepository, "GeneralsX Git URL used when --repo does not exist")
 	flags.StringVar(&cfg.sourceRef, "source-ref", defaults.SourceReference, "game source branch, tag, or commit to check out after cloning")
@@ -169,6 +184,18 @@ func parseConfig(arguments []string, stderr io.Writer) (config, error) {
 	}
 	if flags.NArg() != 0 {
 		return config{}, fmt.Errorf("unexpected positional arguments: %s", strings.Join(flags.Args(), " "))
+	}
+	if cfg.buildMode == "prebuilt" {
+		var conflict string
+		flags.Visit(func(value *flag.Flag) {
+			switch value.Name {
+			case "repo", "source-repo", "source-ref", "online-server-source", "online-server-repo", "online-server-ref":
+				conflict = value.Name
+			}
+		})
+		if conflict != "" {
+			return config{}, fmt.Errorf("--%s applies only to --build-mode source", conflict)
+		}
 	}
 
 	resolvedTarget, err := parseTarget(requestedTarget, runtime.GOOS)
@@ -285,6 +312,9 @@ func (cfg config) primaryArtifactPath() string {
 }
 
 func validateConfig(cfg config) error {
+	if err := validateRuntimeConfig(cfg); err != nil {
+		return err
+	}
 	if cfg.repoRoot == "" || cfg.assetsDir == "" || cfg.cacheDir == "" || cfg.output == "" {
 		return errors.New("repository, assets, cache, and output paths must not be empty")
 	}
@@ -317,7 +347,7 @@ func validateConfig(cfg config) error {
 	if pathsOverlap(cfg.assetsDir, filepath.Dir(cfg.output)) {
 		return errors.New("SFX output directory must not overlap the retail asset tree")
 	}
-	if pathsOverlap(cfg.assetsDir, cfg.repoRoot) {
+	if cfg.buildMode != "prebuilt" && pathsOverlap(cfg.assetsDir, cfg.repoRoot) {
 		return errors.New("source checkout must not overlap the retail asset tree")
 	}
 	if pathsOverlap(cfg.assetsDir, cfg.cacheDir) || pathsOverlap(cfg.assetsDir, cfg.steamCMDDir) {
