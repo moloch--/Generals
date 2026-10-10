@@ -281,9 +281,20 @@ asset processing.
   checksums, descriptor identities, and archive digests. The Windows builder
   also fetched the release through its normal public resolver from an empty
   cache, assembled a native SFX, and passed full `--sfx-verify`.
-- Native clean-machine retail gameplay and replay checks remain unperformed
-  for this release; synthetic packaging tests do not establish gameplay
-  compatibility. Builder release `v0.0.6` predates prebuilt mode; the current
+- A separate Windows run used an empty runtime cache and owned retail assets,
+  produced a 1,769,198,592-byte SFX in 14 minutes 36 seconds, and passed full
+  `--sfx-verify`. First launch into an isolated cache/profile reached the main
+  menu and an Alpine Assault skirmish; unit movement, completed construction,
+  results, and normal exit passed. The actual running engine and all 22 runtime
+  files matched the release descriptor. All 523 original asset files retained
+  their paths, sizes, and SHA-256 hashes; the test profile setting was restored.
+  Local evidence is in `build/prebuilt-e2e-runtime-v0.1.0-retail/`.
+- Clean-machine dependency checks, Linux/macOS retail gameplay, audio/video,
+  Online interoperability, and legacy replay compatibility remain unverified
+  for this release. The Windows smoke test also observed an existing missing
+  `GUI:CustomMission` translation from the retail patch-text loading path;
+  archive hashes confirmed assembly preserved the relevant assets.
+  Builder release `v0.0.6` predates prebuilt mode; the current
   source checkout supplies the updated headless tool until a newer builder
   release includes it.
 - Step 3 (compiler-free packaging) remains a separate payload-format change.
