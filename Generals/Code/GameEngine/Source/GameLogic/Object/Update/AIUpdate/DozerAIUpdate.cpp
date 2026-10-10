@@ -530,7 +530,8 @@ StateReturnType DozerActionDoActionState::update()
 
 				// increase the construction percent of the goal object
 				Int framesToBuild = goalObject->getTemplate()->calcTimeToBuild( dozer->getControllingPlayer() );
-				Real percentProgressThisFrame = 100.0f / framesToBuild;
+				// GeneralsX @bugfix OpenAI 02/08/2026 Keep simulation calculations deterministic and safe across platforms.
+				Real percentProgressThisFrame = WWMath::Div_FixNaN(100.0f, (Real)framesToBuild, 100.0f);
 				goalObject->setConstructionPercent( goalObject->getConstructionPercent() +
 																						percentProgressThisFrame );
 
@@ -2541,5 +2542,4 @@ void DozerAIUpdate::loadPostProcess()
  // extend base class
 	AIUpdateInterface::loadPostProcess();
 }
-
 

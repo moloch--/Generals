@@ -89,6 +89,15 @@ jobs:
       preset: macos-vulkan
     secrets: inherit
 
+  # GeneralsX @test OpenAI 02/08/2026 Validate the native Windows SFX and its real pack/verify smoke test.
+  test-windows-sfx:
+    name: Test Windows SFX
+    needs: detect-changes
+    uses: ./.github/workflows/build-windows.yml
+    with:
+      game: GeneralsMD
+      preset: win32-vcpkg
+
   # GeneralsX @build BenderAI 18/05/2026 Deterministic replay tests run after Flatpak build on Linux and app build on macOS.
   # Each job downloads the built artifact, extracts game assets (ASSETS_KEY secret) and
   # platform replays from fbraz3/GeneralsXReplays, then runs headless replay simulations.
@@ -117,7 +126,7 @@ jobs:
   ci-summary:
     name: CI Summary
     runs-on: ubuntu-latest
-    needs: [build-linux-flatpak, build-macos, replay-test-linux, replay-test-macos]
+    needs: [build-linux-flatpak, build-macos, test-windows-sfx, replay-test-linux, replay-test-macos]
     if: always()
     steps:
       - name: Generate Summary
@@ -128,6 +137,7 @@ jobs:
           echo "|----------|--------|" >> $GITHUB_STEP_SUMMARY
           echo "| Linux Flatpak | ${{ needs.build-linux-flatpak.result == 'success' && '✅ Success' || needs.build-linux-flatpak.result == 'skipped' && '⏭️ Skipped' || needs.build-linux-flatpak.result == 'cancelled' && '⏭️ Skipped' || '❌ Failed' }} |" >> $GITHUB_STEP_SUMMARY
           echo "| macOS (arm64) | ${{ needs.build-macos.result == 'success' && '✅ Success' || needs.build-macos.result == 'skipped' && '⏭️ Skipped' || needs.build-macos.result == 'cancelled' && '⏭️ Skipped' || '❌ Failed' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Windows SFX | ${{ needs.test-windows-sfx.result == 'success' && '✅ Success' || needs.test-windows-sfx.result == 'skipped' && '⏭️ Skipped' || needs.test-windows-sfx.result == 'cancelled' && '⏭️ Skipped' || '❌ Failed' }} |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "| Replay Tests | Status |" >> $GITHUB_STEP_SUMMARY
           echo "|--------------|--------|" >> $GITHUB_STEP_SUMMARY
@@ -138,7 +148,7 @@ jobs:
         if: |
           needs.build-linux-flatpak.result == 'failure' ||
           needs.build-macos.result == 'failure' ||
+          needs.test-windows-sfx.result == 'failure' ||
           needs.replay-test-linux.result == 'failure' ||
           needs.replay-test-macos.result == 'failure'
         run: exit 1
-

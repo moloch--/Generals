@@ -65,6 +65,9 @@
 #include "GameNetwork/GameSpy/ThreadUtils.h"
 #include "GameNetwork/GameSpy/MainMenuUtils.h"
 #include "GameNetwork/WOLBrowser/WebBrowser.h"
+#ifdef SAGE_CUSTOM_ONLINE
+#include "GameNetwork/Online/OnlineEndpoint.h"
+#endif
 
 // PRIVATE DATA ///////////////////////////////////////////////////////////////////////////////////
 static Bool isShuttingDown = FALSE;
@@ -314,6 +317,15 @@ OverallStats::OverallStats()
 
 static UnicodeString calcPercent(const OverallStats& stats, Int n, UnicodeString sideStr)
 {
+#ifdef SAGE_CUSTOM_ONLINE
+	// GeneralsX @bugfix Codex 10/10/2026 Show unavailable faction statistics without inventing a zero win rate.
+	if (GeneralsOnline::GetOnlineEndpoint().configured)
+	{
+		UnicodeString unavailable;
+		unavailable.format(L"- %ls", sideStr.str());
+		return unavailable;
+	}
+#endif
 	// per side percentage of total wins
 	Real winPercentUSA   = s_statsUSA.wins[n]*100/INT_TO_REAL(max(1, s_statsUSA.wins[n]+s_statsUSA.losses[n])); // 0.0f - 100.0f
 	Real winPercentChina = s_statsChina.wins[n]*100/INT_TO_REAL(max(1, s_statsChina.wins[n]+s_statsChina.losses[n])); // 0.0f - 100.0f

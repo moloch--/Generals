@@ -56,6 +56,7 @@ modules:
           -DSAGE_USE_SDL3=ON \
           -DSAGE_USE_OPENAL=ON \
           -DSAGE_USE_GLM=ON \
+          -DSAGE_USE_DETERMINISTIC_MATH=ON \
           -DSAGE_UPDATE_CHECK=ON \
           -DRTS_BUILD_OPTION_SAGE_PATCH=ON \
           -DFETCHCONTENT_FULLY_DISCONNECTED=ON \
@@ -66,6 +67,7 @@ modules:
           -DFETCHCONTENT_SOURCE_DIR_OPENAL_SOFT=/run/build/generalsxzh/openal-soft-src \
           -DFETCHCONTENT_SOURCE_DIR_GAMESPY=/run/build/generalsxzh/gamespy-src \
           -DFETCHCONTENT_SOURCE_DIR_NLOHMANN_JSON=/run/build/generalsxzh/nlohmann-json-src \
+          -DFETCHCONTENT_SOURCE_DIR_GAMEMATH=/run/build/generalsxzh/gamemath-src \
           -DFETCHCONTENT_SOURCE_DIR_LZHL=/run/build/generalsxzh/lzhl-src/CompLibHeader \
           -DFETCHCONTENT_SOURCE_DIR_STB=/run/build/generalsxzh/stb-src
       - cmake --build build-flatpak --target z_generals -j "${FLATPAK_BUILDER_N_JOBS:-4}"
@@ -190,6 +192,11 @@ modules:
         url: https://github.com/nlohmann/json.git
         commit: 9cca280a4d0ccf0c08f47a99aa71d1b0e52f8d03
         dest: nlohmann-json-src
+      # GeneralsX @build OpenAI 02/08/2026 Stage pinned GameMath for fully disconnected CMake configuration.
+      - type: git
+        url: https://github.com/TheSuperHackers/GameMath.git
+        commit: 59f7ccd494f7e7c916a784ac26ef266f9f09d78d
+        dest: gamemath-src
       - type: git
         url: https://github.com/TheSuperHackers/stb.git
         commit: 5c205738c191bcb0abc65c4febfa9bd25ff35234

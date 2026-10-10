@@ -76,7 +76,8 @@ public:
 	virtual void updateStagingRoom( GameSpyStagingRoom room ) override;
 	virtual void removeStagingRoom( GameSpyStagingRoom room ) override;
 	virtual Bool hasStagingRoomListChanged() override;
-	virtual void leaveStagingRoom() override;
+	// GeneralsX @bugfix OpenAI 02/08/2026 Carry the successful-launch reason through the concrete GameSpy adapter.
+	virtual void leaveStagingRoom(Bool gameLaunchCommitted = FALSE) override;
 	virtual void markAsStagingRoomHost() override;
 	virtual void markAsStagingRoomJoiner( Int game ) override;
 	virtual Int getCurrentStagingRoomID() override { return m_localStagingRoomID; }

@@ -290,7 +290,8 @@ public:
 			Real dy = primary->y - secondary->y;
 
 			//Calc length
-			Real length = sqrt( dx*dx + dy*dy );
+			// GeneralsX @bugfix OpenAI 02/08/2026 Keep simulation calculations deterministic and safe across platforms.
+			Real length = WWMath::SqrtOrigin( dx*dx + dy*dy );
 
 			//Normalize length
 			dx /= length;
@@ -357,7 +358,7 @@ public:
 			}
 
 
-			Real orient = atan2( moveToPos.y - startPos.y, moveToPos.x - startPos.x);
+			Real orient = WWMath::Atan2Origin( moveToPos.y - startPos.y, moveToPos.x - startPos.x);
 			if( m_data.m_distToTarget > 0 )
 			{
 				const Real SLOP = 1.5f;
@@ -1108,7 +1109,7 @@ protected:
 
 				objUp->applyForce(&force);
 				if (m_orientInForceDirection)
-					orientation = atan2(force.y, force.x);
+					orientation = WWMath::Atan2Origin(force.y, force.x);
 
 			}
 		}
@@ -1196,7 +1197,7 @@ protected:
 				objUp->applyForce(&force);
 				if (m_orientInForceDirection)
 				{
-					orientation = atan2(force.y, force.x);
+					orientation = WWMath::Atan2Origin(force.y, force.x);
 				}
 				DUMPREAL(orientation);
 				objUp->setAngles(orientation, 0, 0);

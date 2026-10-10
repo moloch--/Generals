@@ -338,12 +338,13 @@ Object* CommandButtonHuntUpdate::scanClosestTarget()
 					}
 				}
 				Real distSqr = ThePartitionManager->getDistanceSquared(me, other, FROM_BOUNDINGSPHERE_2D);
-				Real dist = sqrt(distSqr);
+				// GeneralsX @bugfix OpenAI 02/08/2026 Keep simulation calculations deterministic and safe across platforms.
+				Real dist = WWMath::SqrtOrigin(distSqr);
 				Int curPriority = data->m_scanRange - dist;
 				if (info) curPriority = info->getPriority(other->getTemplate());
 				if (curPriority == 0)
 					continue; // don't attack 0 priority targets.
-				Int modifier = dist/TheAI->getAiData()->m_attackPriorityDistanceModifier;
+				Int modifier = (Int)WWMath::Div_FixNaN(dist, TheAI->getAiData()->m_attackPriorityDistanceModifier, 0.0f);
 				Int modPriority = curPriority-modifier;
 				if (modPriority < 1)
 					modPriority = 1;

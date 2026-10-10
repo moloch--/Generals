@@ -29,12 +29,7 @@
 
 #include "PreRTS.h"	// This must go first in EVERY cpp file in the GameEngine
 
-#if !defined(_WIN32) || defined(__MINGW32__)
-#include <fenv.h>
-#if defined(__SSE__) || defined(__x86_64__)
-#include <xmmintrin.h>
-#endif
-#endif
+#include "Platform/FloatingPoint.h"
 
 #include "Common/AudioAffect.h"
 #include "Common/AudioHandleSpecialValues.h"
@@ -202,46 +197,8 @@ static Waypoint * findNamedWaypoint(AsciiString name)
 // ------------------------------------------------------------------------------------------------
 void setFPMode()
 {
-  // Set floating point round mode to CHOP, which only comes
-  // into play when precision is exceeded.  This is necessary
-  // for the fast float to int routines used elsewhere in the
-  // system.
-	//
-	// Also set floating point precision to low.  It could be
-	// anything as long as it is consistent, really, but this
-	// is in the (vain?) hope of any slight speed boost.
-	//
-	
-	// GeneralsX @bugfix BenderAI 14/03/2026 Align non-Windows x86 FPU control with the Windows replay determinism baseline.
-	// GeneralsX @bugfix OpenAI 29/07/2026 Use the portable x87 path when strict-mode MinGW hides MSVC CRT controls.
-	#if defined(_WIN32) && !defined(__MINGW32__)
-	_fpreset();
-
-	UnsignedInt curVal = _statusfp();
-	UnsignedInt newVal = curVal;
-	newVal = (newVal & ~_MCW_RC) | (_RC_NEAR & _MCW_RC);
-	//newVal = (newVal & ~_MCW_RC) | (_RC_CHOP & _MCW_RC);
-	newVal = (newVal & ~_MCW_PC) | (_PC_24   & _MCW_PC);
-
-	_controlfp(newVal, _MCW_PC | _MCW_RC);
-	#else
-	fesetenv(FE_DFL_ENV);
-	feclearexcept(FE_ALL_EXCEPT);
-	fesetround(FE_TONEAREST);
-
-	#if defined(__i386__) || defined(__x86_64__)
-	unsigned short controlWord = 0;
-	__asm__ __volatile__("fnstcw %0" : "=m" (controlWord));
-	controlWord = static_cast<unsigned short>(controlWord & ~0x0F00u);
-	__asm__ __volatile__("fldcw %0" : : "m" (controlWord));
-	#endif
-
-	#if defined(__SSE__) || defined(__x86_64__)
-	UnsignedInt mxcsr = static_cast<UnsignedInt>(_mm_getcsr());
-	mxcsr = (mxcsr & ~static_cast<UnsignedInt>(_MM_ROUND_MASK)) | static_cast<UnsignedInt>(_MM_ROUND_NEAREST);
-	_mm_setcsr(mxcsr);
-	#endif
-	#endif
+	// GeneralsX @refactor Codex 10/10/2026 Use the platform reset shared with the deterministic math tests.
+	ResetSimulationFloatingPointMode();
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -877,7 +834,7 @@ static void populateRandomStartPosition( GameInfo *game )
 				{
 					Coord3D p1 = c1->second;
 					Coord3D p2 = c2->second;
-					startSpotDistance[i][j] = sqrt( sqr(p1.x-p2.x) + sqr(p1.y-p2.y) );
+					startSpotDistance[i][j] = WWMath::SqrtOrigin( sqr(p1.x-p2.x) + sqr(p1.y-p2.y) );
 				}
 			}
 			else
@@ -3749,6 +3706,9 @@ void GameLogic::update()
 {
 	USE_PERF_TIMER(GameLogic_update)
 	PROFILER_SECTION_COLOR(0x4CAF50);
+
+	// GeneralsX @bugfix fbraz3 16/07/2026 Lock FPU state before every simulation frame
+	ScopedFPUGuard fpuGuard;
 
 	LatchRestore<Bool> inUpdateLatch(m_isInUpdate, TRUE);
 #ifdef DO_UNIT_TIMINGS

@@ -10,17 +10,13 @@
 # Reference: Okladnoj et al., PR #2670, TheSuperHackers/GeneralsGameCode
 # https://github.com/TheSuperHackers/GeneralsGameCode/pull/2670
 #
-# Note: GameMath source location is configurable via SAGE_GAMEMATH_GIT_REPO
-# Default: TheSuperHackers fork with deterministic math integration
-#
 # Upstream reference: fdlibm (Berkeley math library) provides platform-independent
 # implementations of standard math functions (sin, cos, sqrt, atan2, etc.) that produce
 # identical results on all architectures when compiled with the same precision flags.
 
 # Enable deterministic math only for non-VC6 builds (VC6 uses native x87 asm)
-# Note: Currently defaults to OFF until GameMath is available as a proper library/submodule
 if(NOT IS_VS6_BUILD)
-    option(SAGE_USE_DETERMINISTIC_MATH "Use fdlibm-based deterministic math for cross-platform replay validation" OFF)
+    option(SAGE_USE_DETERMINISTIC_MATH "Use fdlibm-based deterministic math for cross-platform replay validation" ON)
 else()
     # VC6 uses native x87 inline asm; deterministic mode not applicable
     set(SAGE_USE_DETERMINISTIC_MATH OFF)
@@ -29,41 +25,40 @@ endif()
 if(SAGE_USE_DETERMINISTIC_MATH)
     message(STATUS "Configuring GameMath (fdlibm-based deterministic math)...")
 
+    # GeneralsX @bugfix Codex 10/10/2026 Keep MinGW x86 double arithmetic independent of the retail x87 precision mode.
+    # Apply before FetchContent so GameMath and its callers use the same scalar arithmetic.
+    if(MINGW AND CMAKE_SIZEOF_VOID_P EQUAL 4)
+        add_compile_options(
+            "$<$<COMPILE_LANGUAGE:C,CXX>:-msse2>"
+            "$<$<COMPILE_LANGUAGE:C,CXX>:-mfpmath=sse>"
+        )
+    endif()
+
     include(FetchContent)
 
-    # FetchContent declaration for GameMath library
-    # Source: TheSuperHackers fork with deterministic math support
-    # Can be overridden via cmake -DSAGE_GAMEMATH_GIT_REPO=<url> -DSAGE_GAMEMATH_GIT_TAG=<tag>
-    if(NOT SAGE_GAMEMATH_GIT_REPO)
-        set(SAGE_GAMEMATH_GIT_REPO "https://github.com/TheSuperHackers/GeneralsGameCode.git")
-    endif()
-    
-    if(NOT SAGE_GAMEMATH_GIT_TAG)
-        # Pinned SHA: tracking "main" let the deterministic-math source drift silently.
-        set(SAGE_GAMEMATH_GIT_TAG "838f9d0fd1c658ec795d3903a4f3f7e265b6e6d5")
-    endif()
+    # FORCE is required to guarantee cross-platform bit-exact determinism.
+    # Intrinsics can select platform-specific SIMD implementations.
+    set(GM_ENABLE_INTRINSICS OFF CACHE BOOL "Disable intrinsics for cross-arch determinism" FORCE)
+    set(GM_ENABLE_TESTS OFF CACHE BOOL "Disable GameMath tests" FORCE)
+    set(gamemath_SHARED_LIBS OFF CACHE BOOL "Force GameMath as a static library" FORCE)
 
     FetchContent_Declare(
         gamemath
-        GIT_REPOSITORY ${SAGE_GAMEMATH_GIT_REPO}
-        GIT_TAG ${SAGE_GAMEMATH_GIT_TAG}
-        SOURCE_SUBDIR "Core/GameMath"  # Adjust if GameMath moves
+        GIT_REPOSITORY https://github.com/TheSuperHackers/GameMath.git
+        GIT_TAG        59f7ccd494f7e7c916a784ac26ef266f9f09d78d
     )
-
-    # Minimal GameMath configuration
-    set(GAMEMATH_ENABLE_TESTS OFF CACHE BOOL "Disable GameMath tests" FORCE)
-    set(GAMEMATH_ENABLE_EXAMPLES OFF CACHE BOOL "Disable GameMath examples" FORCE)
 
     # Make GameMath available (FetchContent_MakeAvailable is idempotent)
     FetchContent_MakeAvailable(gamemath)
 
-    # Add USE_DETERMINISTIC_MATH to all compile definitions for this project
-    # This enables conditional compilation in wwmath.h and trig wrappers
-    add_compile_definitions(USE_DETERMINISTIC_MATH)
+    # WWMath is included transitively by many engine targets. Give every target the
+    # same header view so inline wrappers cannot violate the one-definition rule.
+    include_directories(${gamemath_SOURCE_DIR}/include)
+    add_compile_definitions(USE_DETERMINISTIC_MATH=1)
 
     message(STATUS "GameMath deterministic math enabled (fdlibm backend)")
-    message(STATUS "  Math operations will be bit-exact across platforms")
-    message(STATUS "  Performance: Slightly slower than CRT but guarantees replay determinism")
+    message(STATUS "  Simulation math uses the pinned cross-platform backend")
+    message(STATUS "  Validate full simulation determinism with cross-platform replay and multiplayer tests")
 
 else()
     message(STATUS "Deterministic math disabled (SAGE_USE_DETERMINISTIC_MATH=OFF)")

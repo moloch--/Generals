@@ -1883,8 +1883,9 @@ void getHelicopterOffset( Coord3D& posOut, Int idx )
   }
 
   Coord3D tempCtr = posOut;
-  posOut.x = tempCtr.x + (sin(angle) * radius);
-  posOut.y = tempCtr.y + (cos(angle) * radius);
+  // GeneralsX @bugfix OpenAI 02/08/2026 Keep simulation calculations deterministic and safe across platforms.
+  posOut.x = tempCtr.x + (WWMath::SinTrig(angle) * radius);
+  posOut.y = tempCtr.y + (WWMath::CosTrig(angle) * radius);
 
 }
 

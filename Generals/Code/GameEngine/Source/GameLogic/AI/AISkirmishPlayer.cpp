@@ -627,7 +627,8 @@ void AISkirmishPlayer::buildAIBaseDefenseStructure(const AsciiString &thingName,
 
 		Real structureRadius = tTemplate->getTemplateGeometryInfo().getBoundingCircleRadius();
 		Real baseCircumference = 2*PI*m_baseRadius;
-		Real angleOffset = 2*PI*(structureRadius*4/baseCircumference);
+		// GeneralsX @bugfix OpenAI 02/08/2026 Keep simulation calculations deterministic and safe across platforms.
+		Real angleOffset = 2*PI*WWMath::Div_FixNaN(structureRadius*4, baseCircumference, 0.0f);
 
 		Int selector;
 		Real angle;
@@ -663,8 +664,8 @@ void AISkirmishPlayer::buildAIBaseDefenseStructure(const AsciiString &thingName,
 		}
 
 		if (angle > PI/3) break;
-		Real s = sin(angle);
-		Real c = cos(angle);
+		Real s = WWMath::SinTrig(angle);
+		Real c = WWMath::CosTrig(angle);
 
 // TheSuperHackers @info helmutbuhler 21/04/2025 This debug mutates the code to become CRC incompatible
 #if defined(RTS_DEBUG) || !RETAIL_COMPATIBLE_CRC
@@ -1029,8 +1030,8 @@ void AISkirmishPlayer::adjustBuildList(BuildListInfo *list)
 
 	angle += 3*PI/4;
 
-	Real s = sin(angle);
-	Real c = cos(angle);
+	Real s = WWMath::SinTrig(angle);
+	Real c = WWMath::CosTrig(angle);
 
 	cur = list;
 	while (cur) {
@@ -1221,4 +1222,3 @@ void AISkirmishPlayer::loadPostProcess()
 {
 
 }
-

@@ -55,13 +55,23 @@ void		WWMath::Init()
 	int a=0;
 	for (;a<ARC_TABLE_SIZE;++a) {
 		float cv=float(a-ARC_TABLE_SIZE/2)*(1.0f/(ARC_TABLE_SIZE/2));
+	// GeneralsX @bugfix moloch 02/08/2026 Build lookup tables with the same math backend as simulation calls.
+	#if defined(USE_DETERMINISTIC_MATH)
+		_FastAcosTable[a]=WWMath::Acos(cv);
+		_FastAsinTable[a]=WWMath::Asin(cv);
+	#else
 		_FastAcosTable[a]=acos(cv);
 		_FastAsinTable[a]=asin(cv);
+	#endif
 	}
 
 	for (a=0;a<SIN_TABLE_SIZE;++a) {
 		float cv= (float)a * 2.0f * WWMATH_PI / SIN_TABLE_SIZE; //float(a-SIN_TABLE_SIZE/2)*(1.0f/(SIN_TABLE_SIZE/2));
+	#if defined(USE_DETERMINISTIC_MATH)
+		_FastSinTable[a]=WWMath::Sin(cv);
+	#else
 		_FastSinTable[a]=sin(cv);
+	#endif
 
 		if (a>0) {
 			_FastInvSinTable[a]=1.0f/_FastSinTable[a];
@@ -93,4 +103,3 @@ void Do_Force_Links()
 	FORCE_LINK(cardinalspline);
 	FORCE_LINK(tcbspline);
 }
-

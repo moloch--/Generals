@@ -1466,10 +1466,11 @@ void makeAlignToNormalMatrix( Real angle, const Coord3D& pos, const Coord3D& nor
 
 	z = normal;
 
+	// GeneralsX @bugfix OpenAI 02/08/2026 Keep simulation calculations deterministic and safe across platforms.
 	/*
 		It is extremely important that the resulting matrix is such that
 		the xvector points in the angle we specified; specifically,
-		that atan2(xvec.y, xvec.x) == angle. So we must construct
+		that WWMath::Atan2Origin(xvec.y, xvec.x) == angle. So we must construct
 		the matrix carefully to ensure this!
 	*/
 	x.x = Cos( angle );
@@ -2387,7 +2388,7 @@ void TerrainLogic::setWaterHeight( const WaterHandle *water, Real height, Real d
 		center.z = 0.0f;  // irrelavant
 
 		// the max radius to scan around us is the diagonal of the bounding region
-		Real maxDist = sqrt( affectedRegion.width() * affectedRegion.width() +
+		Real maxDist = WWMath::SqrtOrigin( affectedRegion.width() * affectedRegion.width() +
 												 affectedRegion.height() * affectedRegion.height() );
 
 		// scan the objects in the area of the water affected
@@ -2986,4 +2987,3 @@ void TerrainLogic::loadPostProcess()
 	}
 
 }
-

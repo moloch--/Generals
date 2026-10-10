@@ -42,6 +42,10 @@
 #include "GameNetwork/GameSpy/PingThread.h"
 #include "GameNetwork/GameSpy/PersistentStorageThread.h"
 #include "GameNetwork/GameSpy/GSConfig.h"
+#include "GameNetwork/GameSpy/ThreadUtils.h"
+#ifdef SAGE_CUSTOM_ONLINE
+#include "GameNetwork/Online/OnlineEndpoint.h"
+#endif
 #include "GameNetwork/GameSpyOverlay.h"
 #include "GameNetwork/RankPointValue.h"
 #include "GameLogic/GameLogic.h"
@@ -283,9 +287,17 @@ Bool GameSpyInfo::isBuddy( Int id )
 
 void GameSpyInfo::addGroupRoom( GameSpyGroupRoom room )
 {
+	// GeneralsX @bugfix Codex 10/10/2026 Online rooms supply UTF-8 display names, not legacy localization keys.
+#ifdef SAGE_CUSTOM_ONLINE
+	const Bool useOnlineRoomNames = GeneralsOnline::GetOnlineEndpoint().configured;
+#else
+	const Bool useOnlineRoomNames = FALSE;
+#endif
 	if (room.m_groupID == 0)
 	{
 		m_gotGroupRoomList = TRUE;
+		if (useOnlineRoomNames)
+			return;
 
 		GroupRoomMap::iterator iter;
 
@@ -336,9 +348,16 @@ void GameSpyInfo::addGroupRoom( GameSpyGroupRoom room )
 	else
 	{
 		DEBUG_LOG(("Adding group room %d (%s)", room.m_groupID, room.m_name.str()));
-		AsciiString groupLabel;
-		groupLabel.format("GUI:%s", room.m_name.str());
-		room.m_translatedName = TheGameText->fetch(groupLabel);
+		if (useOnlineRoomNames)
+		{
+			room.m_translatedName = UnicodeString(MultiByteToWideCharSingleLine(room.m_name.str()).c_str());
+		}
+		else
+		{
+			AsciiString groupLabel;
+			groupLabel.format("GUI:%s", room.m_name.str());
+			room.m_translatedName = TheGameText->fetch(groupLabel);
+		}
 		m_groupRooms[room.m_groupID] = room;
 		if ( stricmp("quickmatch", room.m_name.str()) == 0 )
 		{
@@ -501,11 +520,13 @@ GameSpyStagingRoom* GameSpyInfo::findStagingRoomByID( Int id )
 	return nullptr;
 }
 
-void GameSpyInfo::leaveStagingRoom()
+void GameSpyInfo::leaveStagingRoom(Bool gameLaunchCommitted)
 {
 	m_localStagingRoomID = 0;
 	PeerRequest req;
 	req.peerRequestType = PeerRequest::PEERREQUEST_LEAVESTAGINGROOM;
+	// GeneralsX @bugfix OpenAI 02/08/2026 Preserve relay state only for a launch that reached the gameplay handoff.
+	req.stagingRoom.gameLaunchCommitted = gameLaunchCommitted;
 	TheGameSpyPeerMessageQueue->addRequest(req);
 	m_playerInfoMap.clear();
 	m_joinedStagingRoom = FALSE;

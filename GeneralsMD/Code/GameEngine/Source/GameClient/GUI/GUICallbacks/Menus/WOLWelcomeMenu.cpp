@@ -67,6 +67,9 @@
 #include "GameNetwork/GameSpy/ThreadUtils.h"
 #include "GameNetwork/GameSpy/MainMenuUtils.h"
 #include "GameNetwork/WOLBrowser/WebBrowser.h"
+#ifdef SAGE_CUSTOM_ONLINE
+#include "GameNetwork/Online/OnlineEndpoint.h"
+#endif
 
 // PRIVATE DATA ///////////////////////////////////////////////////////////////////////////////////
 static Bool isShuttingDown = FALSE;
@@ -373,6 +376,26 @@ static void updateOverallStats()
 	UnicodeString percStr;
 	AsciiString wndName;
 	GameWindow* pWin;
+
+	// GeneralsX @bugfix Codex 10/10/2026 Replace unformatted layout labels when overall faction statistics are unavailable.
+	for (int i = 0; i < ThePlayerTemplateStore->getPlayerTemplateCount(); ++i)
+	{
+		const PlayerTemplate* playerTemplate = ThePlayerTemplateStore->getNthPlayerTemplate(i);
+		if (!playerTemplate->isPlayableSide() || playerTemplate->getSide().compare("Boss") == 0)
+			continue;
+		AsciiString side = playerTemplate->getSide();
+		if (side == "America")
+			side = "USA";
+		wndName.format("WOLWelcomeMenu.wnd:Percent%s", side.str());
+		pWin = TheWindowManager->winGetWindowFromId(nullptr, NAMEKEY(wndName));
+		if (pWin)
+			GadgetCheckBoxSetText(pWin, L"-");
+	}
+#ifdef SAGE_CUSTOM_ONLINE
+	// The Online service reports player totals, not the retired GameSpy faction statistics.
+	if (GeneralsOnline::GetOnlineEndpoint().configured)
+		return;
+#endif
 
 	if( s_totalWinPercent <= 0 )
 		s_totalWinPercent = 1;  //prevent divide by zero

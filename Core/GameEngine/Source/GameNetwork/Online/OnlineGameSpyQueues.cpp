@@ -95,7 +95,6 @@ constexpr std::size_t kMaximumNoncriticalPeerResponses = 480U;
 constexpr std::size_t kMaximumChatLength = 512U;
 constexpr std::size_t kMaximumGameOptionLength = 4096U;
 constexpr const char *kUTMChatPrefix = "__GX_UTM1__";
-constexpr int kOnlineCompatibilityVersion = 1;
 #if RTS_ZEROHOUR
 constexpr const char *kOnlineProduct = "zerohour";
 #else
@@ -166,6 +165,16 @@ bool IsCriticalPeerResponse(const PeerResponse &response)
 		default:
 			return false;
 	}
+}
+
+// GeneralsX @bugfix OpenAI 02/08/2026 Classify only the presence values needed by the retail Loading transition policy.
+OnlineBuddyStatusKind ClassifyOnlineBuddyStatus(int status)
+{
+	if (status == GP_PLAYING)
+		return OnlineBuddyStatusKind::Playing;
+	if (status == GP_ONLINE)
+		return OnlineBuddyStatusKind::Online;
+	return OnlineBuddyStatusKind::Other;
 }
 
 class PeerResponseQueue
@@ -508,6 +517,7 @@ private:
 	bool m_gameStarted = false;
 	bool m_gameEnding = false;
 	bool m_gameCredentialsReady = false;
+	OnlineBuddyStatusPolicy m_buddyStatusPolicy;
 };
 
 OnlineServiceSession &Service()
@@ -679,12 +689,15 @@ void OnlineServiceSession::resetStateLocked()
 	m_publicGames.clear();
 	m_gameListActive = false;
 	m_roomMembers.clear();
+	m_buddyStatusPolicy.reset();
 	clearGameStateLocked();
 }
 
 void OnlineServiceSession::clearGameStateLocked()
 {
 	ClearOnlineSession();
+	// GeneralsX @bugfix OpenAI 02/08/2026 Let the next presence update recover cleanly after any launch abort or game end.
+	m_buddyStatusPolicy.reset();
 	m_currentGame = ServiceGame{};
 	m_hasCurrentGame = false;
 	m_startedRoster.clear();
@@ -1981,6 +1994,7 @@ void OnlineServiceSession::handle(const BuddyRequest &request)
 	{
 		case BuddyRequest::BUDDYREQUEST_LOGOUT:
 			clearGameStateLocked();
+			m_buddyStatusPolicy.reset();
 			m_gameListActive = false;
 			m_publicGames.clear();
 			m_authenticated = false;
@@ -2022,25 +2036,28 @@ void OnlineServiceSession::handle(const BuddyRequest &request)
 		}
 		case BuddyRequest::BUDDYREQUEST_SETSTATUS:
 		{
-			std::string status = request.arg.status.status == GP_AWAY ? "away" :
-				request.arg.status.status == GP_PLAYING ? "in_game" : "online";
-			if (std::string(request.arg.status.locationString).find("Staging") != std::string::npos)
-				status = "in_game";
-			if (status == "online" && m_gameStarted && !m_gameEnding)
-			{
-				const auto local = std::find_if(
-					m_currentGame.members.begin(), m_currentGame.members.end(), [this](const ServiceMember &member) {
-						return member.userId == m_localUserId;
-					});
-				const bool liveHostPresent = std::any_of(
-					m_currentGame.members.begin(), m_currentGame.members.end(), [](const ServiceMember &member) {
-						return member.host;
-					});
-				if (local != m_currentGame.members.end() && (local->host || !liveHostPresent) &&
-					sendRequestLocked("game.end", Json::object()))
-					m_gameEnding = true;
-			}
-			sendRequestLocked("buddy.status", Json{{"status", status}});
+			m_buddyStatusPolicy.apply(
+				ClassifyOnlineBuddyStatus(request.arg.status.status), request.arg.status.statusString, [this, &request]() {
+					std::string status = request.arg.status.status == GP_AWAY ? "away" :
+						request.arg.status.status == GP_PLAYING ? "in_game" : "online";
+					if (std::string(request.arg.status.locationString).find("Staging") != std::string::npos)
+						status = "in_game";
+					if (status == "online" && m_gameStarted && !m_gameEnding)
+					{
+						const auto local = std::find_if(
+							m_currentGame.members.begin(), m_currentGame.members.end(), [this](const ServiceMember &member) {
+								return member.userId == m_localUserId;
+							});
+						const bool liveHostPresent = std::any_of(
+							m_currentGame.members.begin(), m_currentGame.members.end(), [](const ServiceMember &member) {
+								return member.host;
+							});
+						if (local != m_currentGame.members.end() && (local->host || !liveHostPresent) &&
+							sendRequestLocked("game.end", Json::object()))
+							m_gameEnding = true;
+					}
+					sendRequestLocked("buddy.status", Json{{"status", status}});
+				});
 			break;
 		}
 		default:
@@ -2059,6 +2076,7 @@ void OnlineServiceSession::handle(const PeerRequest &request)
 			break;
 		case PeerRequest::PEERREQUEST_LOGOUT:
 			clearGameStateLocked();
+			m_buddyStatusPolicy.reset();
 			m_gameListActive = false;
 			m_publicGames.clear();
 			m_authenticated = false;
@@ -2157,8 +2175,11 @@ void OnlineServiceSession::handle(const PeerRequest &request)
 			break;
 		}
 		case PeerRequest::PEERREQUEST_LEAVESTAGINGROOM:
-			clearGameStateLocked();
-			sendRequestLocked("game.leave", Json::object());
+			ApplyOnlineStagingRoomExit(
+				m_gameStarted,
+				request.stagingRoom.gameLaunchCommitted,
+				[this]() { clearGameStateLocked(); },
+				[this]() { sendRequestLocked("game.leave", Json::object()); });
 			break;
 		case PeerRequest::PEERREQUEST_UTMPLAYER:
 		case PeerRequest::PEERREQUEST_UTMROOM:

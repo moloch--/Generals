@@ -167,7 +167,8 @@ void PointDefenseLaserUpdate::fireWhenReady()
 		bonus.clear();
 		Real fireRange = data->m_weaponTemplate->getAttackRange( bonus );
 		Object *me = getObject();
-		Real fDist = sqrt( ThePartitionManager->getDistanceSquared( me, target, FROM_CENTER_2D ) );
+		// GeneralsX @bugfix OpenAI 02/08/2026 Keep simulation calculations deterministic and safe across platforms.
+		Real fDist = WWMath::SqrtOrigin( ThePartitionManager->getDistanceSquared( me, target, FROM_CENTER_2D ) );
 		if( fDist < fireRange )
 		{
 			//We are currently in range!
@@ -290,7 +291,7 @@ Object* PointDefenseLaserUpdate::scanClosestTarget()
 			continue;
 		}
 
-		Real fDist = sqrt( ThePartitionManager->getDistanceSquared( me, other, FROM_CENTER_2D ) );
+		Real fDist = WWMath::SqrtOrigin( ThePartitionManager->getDistanceSquared( me, other, FROM_CENTER_2D ) );
 
 		if( fDist <= fireRange )
 		{
@@ -317,7 +318,7 @@ Object* PointDefenseLaserUpdate::scanClosestTarget()
 					pos.add( *other->getPosition() );
 
 					//Recalculate the distance.
-					fDist = sqrt( ThePartitionManager->getDistanceSquared( me, other, FROM_CENTER_2D ) );
+					fDist = WWMath::SqrtOrigin( ThePartitionManager->getDistanceSquared( me, other, FROM_CENTER_2D ) );
 				}
 			}
 

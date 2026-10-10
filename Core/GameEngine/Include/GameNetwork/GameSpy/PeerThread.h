@@ -108,6 +108,8 @@ public:
 		struct
 		{
 			Int id;
+			// GeneralsX @bugfix OpenAI 02/08/2026 Distinguish a completed launch detach from an aborting staging-room exit.
+			Bool gameLaunchCommitted;
 		} stagingRoom;
 
 		struct

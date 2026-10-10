@@ -1197,6 +1197,8 @@ target_sources(corei_gameengine_private INTERFACE ${GAMEENGINE_SRC})
 
 target_include_directories(corei_gameengine_private INTERFACE
 #    Include/Precompiled
+    # GeneralsX @refactor Codex 10/10/2026 Keep the shared simulation FPU reset in the platform layer.
+    ${CMAKE_SOURCE_DIR}/Core/GameEngineDevice/Include
 )
 
 target_link_libraries(corei_gameengine_private INTERFACE
@@ -1262,6 +1264,7 @@ if(RTS_BUILD_ONLINE_TESTS AND NOT IS_VS6_BUILD)
         Include
         ${GENERALSX_GENERATED_INCLUDE_DIR}
         ${CMAKE_SOURCE_DIR}/Core/Libraries/Include
+        ${CMAKE_SOURCE_DIR}/Core/GameEngineDevice/Include
         ${CMAKE_SOURCE_DIR}/Dependencies/Utility
     )
     # GeneralsX @test Codex 01/08/2026 Run the native relay fixture on POSIX and MSVC.
@@ -1300,7 +1303,31 @@ if(RTS_BUILD_ONLINE_TESTS AND NOT IS_VS6_BUILD)
         target_link_libraries(generalsx_online_endpoint_tests PRIVATE CURL::libcurl)
     endif()
     if(WIN32)
-        target_link_libraries(generalsx_online_endpoint_tests PRIVATE ws2_32)
+        # GeneralsX @build Codex 10/10/2026 Link the Windows timer used by the focused relay transport tests.
+        target_link_libraries(generalsx_online_endpoint_tests PRIVATE ws2_32 winmm)
     endif()
     add_test(NAME generalsx_online_endpoint_tests COMMAND generalsx_online_endpoint_tests)
+
+    # GeneralsX @test OpenAI 02/08/2026 Pin WWMath's deterministic GameMath dispatch to cross-platform bit patterns.
+    if(SAGE_USE_DETERMINISTIC_MATH)
+        add_executable(generalsx_wwmath_determinism_tests
+            Tests/GameNetwork/Online/WWMathDeterminismTest.cpp
+        )
+        target_include_directories(generalsx_wwmath_determinism_tests PRIVATE
+            ${CMAKE_SOURCE_DIR}/Core/GameEngineDevice/Include
+        )
+        target_compile_definitions(generalsx_wwmath_determinism_tests PRIVATE
+            DISABLE_GAMEMEMORY=1
+        )
+        target_compile_features(generalsx_wwmath_determinism_tests PRIVATE cxx_std_20)
+        target_link_libraries(generalsx_wwmath_determinism_tests PRIVATE
+            gamemath
+            core_wwcommon
+            corei_always
+        )
+        add_test(
+            NAME generalsx_wwmath_determinism_tests
+            COMMAND generalsx_wwmath_determinism_tests
+        )
+    endif()
 endif()

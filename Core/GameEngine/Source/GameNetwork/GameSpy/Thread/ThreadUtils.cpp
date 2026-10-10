@@ -27,39 +27,14 @@
 // Author: Matthew D. Campbell, July 2002
 
 #include "PreRTS.h"	// This must go first in EVERY cpp file in the GameEngine
+#include "Platform/Utf8.h"
 
 //-------------------------------------------------------------------------
 
 std::wstring MultiByteToWideCharSingleLine( const char *orig )
 {
-	Int len = strlen(orig);
-	WideChar *dest = NEW WideChar[len+1];
-
-	MultiByteToWideChar(CP_UTF8, 0, orig, -1, dest, len);
-	WideChar *c = nullptr;
-	do
-	{
-		c = wcschr(dest, L'\n');
-		if (c)
-		{
-			*c = L' ';
-		}
-	}
-	while ( c != nullptr );
-	do
-	{
-		c = wcschr(dest, L'\r');
-		if (c)
-		{
-			*c = L' ';
-		}
-	}
-	while ( c != nullptr );
-
-	dest[len] = 0;
-	std::wstring ret = dest;
-	delete[] dest;
-	return ret;
+	// GeneralsX @bugfix Codex 10/10/2026 Avoid native buffer-size and POSIX locale-dependent conversion failures.
+	return GeneralsPlatform::DecodeUtf8SingleLine(orig);
 }
 
 std::string WideCharStringToMultiByte( const WideChar *orig )

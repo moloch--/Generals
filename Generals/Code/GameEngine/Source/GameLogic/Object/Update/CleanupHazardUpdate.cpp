@@ -172,7 +172,8 @@ UpdateSleepTime CleanupHazardUpdate::update()
 		AIUpdateInterface *ai = obj->getAI();
 		if( ai && (ai->isIdle() || ai->isBusy()) )
 		{
-			Real fDist = sqrt( ThePartitionManager->getDistanceSquared( obj, &m_pos, FROM_CENTER_2D ) );
+			// GeneralsX @bugfix OpenAI 02/08/2026 Keep simulation calculations deterministic and safe across platforms.
+			Real fDist = WWMath::SqrtOrigin( ThePartitionManager->getDistanceSquared( obj, &m_pos, FROM_CENTER_2D ) );
 			if( fDist < 25.0f )
 			{
 				//Abort clean area because there's nothing left to clean!
@@ -204,7 +205,7 @@ void CleanupHazardUpdate::fireWhenReady()
 		bonus.clear();
 		Real fireRange = m_weaponTemplate->getAttackRange( bonus );
 		Object *me = getObject();
-		Real fDist = sqrt( ThePartitionManager->getDistanceSquared( me, target, FROM_CENTER_2D ) );
+		Real fDist = WWMath::SqrtOrigin( ThePartitionManager->getDistanceSquared( me, target, FROM_CENTER_2D ) );
 		if( fDist < fireRange )
 		{
 			//We are currently in range!

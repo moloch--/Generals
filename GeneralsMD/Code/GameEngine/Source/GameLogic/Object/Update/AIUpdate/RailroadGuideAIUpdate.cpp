@@ -320,7 +320,8 @@ void RailroadBehavior::onCollide( Object *other, const Coord3D *loc, const Coord
 		m_whistleSound.setPlayingHandle(TheAudio->addAudioEvent( &m_whistleSound ));
 
 
-	Real dist = (Real)sqrtf( dlt.x*dlt.x + dlt.y*dlt.y + dlt.z*dlt.z);
+	// GeneralsX @bugfix OpenAI 02/08/2026 Keep simulation calculations deterministic and safe across platforms.
+	Real dist = (Real)WWMath::SqrtfOrigin( dlt.x*dlt.x + dlt.y*dlt.y + dlt.z*dlt.z);
 	Real usRadius = obj->getGeometryInfo().getMajorRadius();
 	Real themRadius = other->getGeometryInfo().getMajorRadius();
 	Real overlap = ((usRadius + themRadius) - dist) + 1;// the plus 1 makes them go just outside of me.
@@ -1299,7 +1300,7 @@ void RailroadBehavior::updatePositionTrackDistance( PullInfo *pullerInfo, PullIn
 	trackPosDelta.z = 0;
 	Real dx = pullerInfo->towHitchPosition.x - turnPos.x;
 	Real dy = pullerInfo->towHitchPosition.y - turnPos.y;
-	Real desiredAngle = atan2(dy, dx);
+	Real desiredAngle = WWMath::Atan2Origin(dy, dx);
 
 
 	Real relAngle = stdAngleDiff(desiredAngle, obj->getTransformMatrix()->Get_Z_Rotation());
@@ -1641,7 +1642,6 @@ void RailroadBehavior::loadPostProcess()
 	m_clicketyClackSound.setObjectID( getObject()->getID() ) ;
 
 }
-
 
 
 
