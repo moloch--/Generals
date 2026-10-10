@@ -189,16 +189,14 @@ func TestRuntimeDownloadCacheAndLocalAssembly(t *testing.T) {
 	}
 }
 
+// GeneralsX @build Codex 10/10/2026 Exercise each native CI runtime through the complete local assembly path.
 // This opt-in check uses an actual produced runtime and the released packaging
 // kit, but only synthetic retail data. It never launches the native game.
-func TestPrebuiltProducedWindowsRuntimeEndToEnd(t *testing.T) {
+func TestPrebuiltProducedRuntimeEndToEnd(t *testing.T) {
 	metadataPath := os.Getenv("GX_TEST_RUNTIME_DESCRIPTOR")
 	archivePath := os.Getenv("GX_TEST_RUNTIME_ARCHIVE")
 	if metadataPath == "" || archivePath == "" {
-		t.Skip("set GX_TEST_RUNTIME_DESCRIPTOR and GX_TEST_RUNTIME_ARCHIVE to exercise a produced Windows runtime")
-	}
-	if runtime.GOOS != "windows" || runtime.GOARCH != "amd64" {
-		t.Skip("native Windows amd64 packaging check")
+		t.Skip("set GX_TEST_RUNTIME_DESCRIPTOR and GX_TEST_RUNTIME_ARCHIVE to exercise a produced native runtime")
 	}
 	metadata, err := os.ReadFile(metadataPath)
 	if err != nil {
@@ -208,12 +206,25 @@ func TestPrebuiltProducedWindowsRuntimeEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	var buildTarget target
+	switch d.Target {
+	case "windows-x86":
+		buildTarget = targetWindows
+	case "macos-arm64":
+		buildTarget = targetMacOS
+	case "linux-amd64":
+		buildTarget = targetLinux
+	default:
+		t.Fatalf("unsupported runtime target %s", d.Target)
+	}
 	root := t.TempDir()
 	assets := filepath.Join(root, "owned")
 	writeCompleteAssetTree(t, assets)
-	for _, name := range []string{"binkw32.dll", "mss32.dll"} {
-		if err := os.WriteFile(filepath.Join(assets, name), prebuiltTestPE(t), 0o600); err != nil {
-			t.Fatal(err)
+	if buildTarget == targetWindows {
+		for _, name := range []string{"binkw32.dll", "mss32.dll"} {
+			if err := os.WriteFile(filepath.Join(assets, name), prebuiltTestPE(t), 0o600); err != nil {
+				t.Fatal(err)
+			}
 		}
 	}
 	cache := filepath.Join(root, "cache")
@@ -221,7 +232,17 @@ func TestPrebuiltProducedWindowsRuntimeEndToEnd(t *testing.T) {
 		t.Fatal(err)
 	}
 	var logs bytes.Buffer
-	app := application{cfg: config{buildMode: "prebuilt", runtimeOffline: true, runtimeRepository: d.Repository, runtimeVersion: d.Version, target: targetWindows, assetsDir: assets, cacheDir: cache, output: filepath.Join(root, "output", "game.exe"), onlineEndpoint: defaultOnlineEndpoint, skipAssets: true}, hostOS: "windows", hostArch: "amd64", runner: runner{stdout: &logs, stderr: &logs}}
+	output := filepath.Join(root, "output", "game-sfx")
+	if buildTarget == targetWindows {
+		output += ".exe"
+	}
+	app := application{cfg: config{buildMode: "prebuilt", runtimeOffline: true, runtimeRepository: d.Repository, runtimeVersion: d.Version, target: buildTarget, assetsDir: assets, cacheDir: cache, output: output, onlineEndpoint: defaultOnlineEndpoint, skipAssets: true}, hostOS: runtime.GOOS, hostArch: runtime.GOARCH, runner: runner{stdout: &logs, stderr: &logs}}
+	if buildTarget == targetMacOS {
+		app.cfg.appOutput = filepath.Join(root, "output", "GeneralsXZH.app")
+	}
+	if err := app.validateHostTarget(); err != nil {
+		t.Fatal(err)
+	}
 	cachePath, err := app.runtimeCache(d.Version)
 	if err != nil {
 		t.Fatal(err)
@@ -237,6 +258,12 @@ func TestPrebuiltProducedWindowsRuntimeEndToEnd(t *testing.T) {
 	}
 	if info, err := os.Stat(app.cfg.output); err != nil || info.Size() == 0 {
 		t.Fatalf("missing final SFX: %v", err)
+	}
+	if buildTarget == targetMacOS {
+		launcher := filepath.Join(app.cfg.appOutput, "Contents", "MacOS", "GeneralsXZH")
+		if err := app.runner.run(context.Background(), command{name: launcher, args: []string{"--sfx-verify"}}); err != nil {
+			t.Fatalf("verify published app: %v\n%s", err, logs.String())
+		}
 	}
 	for _, forbidden := range []string{"git clone", "cmake --", "vcpkg install", "dumpbin"} {
 		if strings.Contains(logs.String(), forbidden) {

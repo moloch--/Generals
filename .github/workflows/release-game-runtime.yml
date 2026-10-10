@@ -155,7 +155,9 @@ jobs:
         run: |
           set -euo pipefail
           root="$RUNNER_TEMP/runtime-vcpkg"
-          git clone --filter=blob:none https://github.com/microsoft/vcpkg.git "$root"
+          # Historical manifest ports must already be local when vcpkg prepares
+          # them; its sanitized Windows subprocesses cannot reliably lazy-fetch.
+          git clone --no-checkout https://github.com/microsoft/vcpkg.git "$root"
           git -C "$root" checkout --detach "$VCPKG_COMMIT"
           if [[ "$RUNNER_OS" == Windows ]]; then
             "$root/bootstrap-vcpkg.bat" -disableMetrics
@@ -216,6 +218,13 @@ jobs:
             --online-endpoint "$GX_ONLINE_SERVER_DEFAULT" --preset "$PRESET" "${extra[@]}"
           test -s "dist/generalsxzh-runtime-${RUNTIME_VERSION}-${TARGET}.json"
           test -s "dist/generalsxzh-runtime-${RUNTIME_VERSION}-${TARGET}.tar.gz"
+      - name: Assemble and verify native personal installer with synthetic assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          export GX_TEST_RUNTIME_DESCRIPTOR="$GITHUB_WORKSPACE/dist/generalsxzh-runtime-${RUNTIME_VERSION}-${TARGET}.json"
+          export GX_TEST_RUNTIME_ARCHIVE="$GITHUB_WORKSPACE/dist/generalsxzh-runtime-${RUNTIME_VERSION}-${TARGET}.tar.gz"
+          go test ./internal/buildcli -run '^TestPrebuiltProducedRuntimeEndToEnd$' -count=1 -timeout 30m -v
       - name: Upload runtime output
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
