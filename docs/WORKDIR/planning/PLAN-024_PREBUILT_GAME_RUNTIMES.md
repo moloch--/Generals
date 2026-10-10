@@ -1,7 +1,7 @@
 # PLAN-024 Prebuilt Game Runtimes for the Automated Build Tool
 
 Date: 2026-10-10
-Status: Steps 1 and 2 implemented; hosted native builds and first release pending
+Status: Steps 1 and 2 released as runtime-v0.1.0; step 3 remains separate
 
 ## Purpose
 
@@ -271,9 +271,21 @@ asset processing.
   interrupted downloads, concurrent downloads, asset preservation, overlay
   handling, and output rollback. Cross-built Linux/macOS launchers from the
   extracted packaging kit.
-- GitHub-hosted native Linux/macOS engine builds, clean-machine gameplay checks,
-  and runtime publication have not run in this local implementation session.
-  The workflow must pass before advertising available downloads.
+- Published [runtime-v0.1.0](https://github.com/moloch--/Generals/releases/tag/runtime-v0.1.0)
+  from `bfc4c6aa65132da09abacc8a10c2760e88973d6f`. All three native engine builds,
+  archive checks, and synthetic-asset installer assembly/verification passed in
+  [the tagged workflow](https://github.com/moloch--/Generals/actions/runs/38074499258).
+  Fixed Windows dependency setup by replacing the vcpkg partial clone with a
+  complete clone before these successful runs.
+- Downloaded all seven public release assets and verified their sizes, SHA-256
+  checksums, descriptor identities, and archive digests. The Windows builder
+  also fetched the release through its normal public resolver from an empty
+  cache, assembled a native SFX, and passed full `--sfx-verify`.
+- Native clean-machine retail gameplay and replay checks remain unperformed
+  for this release; synthetic packaging tests do not establish gameplay
+  compatibility. Builder release `v0.0.6` predates prebuilt mode; the current
+  source checkout supplies the updated headless tool until a newer builder
+  release includes it.
 - Step 3 (compiler-free packaging) remains a separate payload-format change.
   Go and the macOS progress-helper compiler requirements are explicit in the UI,
   CLI diagnostics, and user guide.

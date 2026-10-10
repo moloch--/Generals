@@ -7,7 +7,7 @@ Download the Automated Build Tool desktop asset for your host from a tagged
 macOS/ARM64 DMG, the direct Linux/AMD64 desktop executable, or the direct
 Windows/AMD64 desktop `.exe`. After downloading a direct macOS or Linux
 executable, run `chmod +x PATH` before starting it. The three desktop builds
-present the same guided flow:
+present the same guided flow in versions containing PLAN-024 support:
 
 1. choose a target and either **Build from source** or **Download prebuilt game**;
 2. choose a runtime release, or an existing source checkout or clone destination;
@@ -22,9 +22,13 @@ Tool, its headless companion, checksums, and licensing files. Separate
 `runtime-vX.Y.Z` releases distribute engines and redistributable dependencies.
 Neither release type contains a user-generated game SFX or retail game assets.
 
-Source mode remains the default while runtime releases are rolled out. Prebuilt
-mode becomes usable once a compatible runtime release has been published; the
-tool reports a missing release without silently switching to compilation.
+Builder release `v0.0.6` predates prebuilt mode. Until a newer builder release
+includes it, use the headless builder from the current source checkout as shown
+under [Use a prebuilt runtime](#use-a-prebuilt-runtime).
+
+Source mode remains the default. Prebuilt runtimes are available starting with
+`runtime-v0.1.0`; the tool reports a missing or incompatible release without
+silently switching to compilation.
 
 After a real build completes, select **Copy to Desktop** to publish the primary
 personal game artifact through a temporary sibling without overwriting an
@@ -150,13 +154,26 @@ is not a complete GeneralsX checkout is rejected.
 
 ## Use a prebuilt runtime
 
-After the first runtime release is published, select **Download prebuilt game**
-in the desktop app, or run the headless companion:
+[Runtime v0.1.0](https://github.com/moloch--/Generals/releases/tag/runtime-v0.1.0)
+provides Linux AMD64, macOS ARM64, and exploratory Windows x86 engines. In a
+builder containing PLAN-024 support, select **Download prebuilt game** in the
+desktop app, or run the headless companion:
 
 ```sh
 generalsx-build --headless --build-mode prebuilt \
   --runtime-version stable --skip-assets --assets-dir /path/to/GeneralsZH
 ```
+
+With Go 1.25+ installed, you can also run the current headless builder directly
+from the repository root:
+
+```sh
+go run ./cmd/generalsx-build --headless --build-mode prebuilt \
+  --runtime-version stable --skip-assets --assets-dir /path/to/GeneralsZH
+```
+
+This compiles the small Go build tool and packaging launcher locally; the game
+engine and its dependencies come from the selected runtime release.
 
 To download owned data with SteamCMD, omit `--skip-assets` and supply
 `--steam-user YOUR_STEAM_ACCOUNT`. Authentication stays in the local terminal.
@@ -171,11 +188,11 @@ Use an exact tag to reproduce a selection:
 
 ```sh
 generalsx-build --headless --build-mode prebuilt \
-  --runtime-version runtime-v1.0.0 --skip-assets --assets-dir /path/to/GeneralsZH
+  --runtime-version runtime-v0.1.0 --skip-assets --assets-dir /path/to/GeneralsZH
 ```
 
-The example tag must exist. Archives are cached by publisher, release, target,
-and digest and verified again before reuse. For an already cached version,
+Archives are cached by publisher, release, target, and digest and verified
+again before reuse. For an already cached version,
 add `--runtime-offline`; offline mode requires an exact tag and never resolves
 `stable`. Combine it with complete local assets and `--skip-assets` to avoid
 SteamCMD downloads too. Go may still need its packaging-module dependencies
@@ -183,9 +200,9 @@ on the first packaging run; `--runtime-offline` applies to runtime retrieval.
 
 Prebuilt packaging requires the native host: Linux AMD64, macOS ARM64, or
 Windows AMD64. The Windows game remains x86 inside an AMD64 launcher.
-The descriptor enforces the release's measured glibc requirement on Linux,
-macOS 15.0 minimum, and Windows 10.0 minimum. Linux also needs its normal Vulkan
-GPU driver at play time.
+The descriptor enforces the release's measured glibc requirement on Linux
+(`2.38` for `runtime-v0.1.0`), macOS 15.0 minimum, and Windows 10.0 minimum.
+Linux also needs its normal Vulkan GPU driver at play time.
 
 The engine, libraries, dependency relocation, and runtime validation are built
 in GitHub Actions. Locally, this version still requires **Go 1.25+** to build
@@ -218,6 +235,12 @@ temporary Actions artifacts. A new `runtime-vX.Y.Z` tag builds all three
 targets and publishes one complete runtime release only after every target
 and archive passes validation. These tags are separate from builder `vX.Y.Z`
 releases. Existing runtime releases are never overwritten; use a new version.
+
+The repository's **Latest** release is reserved for the builder. The
+`Preserve builder release channel` maintenance workflow explicitly selects the
+newest published stable `vX.Y.Z` builder. Run it manually if GitHub's automatic
+latest selection points to a runtime despite `--latest=false`; this changes
+release metadata only.
 
 Each target publishes a JSON descriptor and a `.tar.gz` containing the runtime
 and its matching small packaging kit. `SHA256SUMS` covers all six assets.

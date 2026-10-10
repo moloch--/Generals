@@ -1,0 +1,41 @@
+name: Preserve builder release channel
+
+# GeneralsX @build Codex 10/10/2026 Explicitly pin the builder channel when GitHub falls back to automatic latest selection.
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/preserve-builder-release.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: preserve-builder-release
+  cancel-in-progress: false
+
+jobs:
+  preserve-builder:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - name: Explicitly select the newest stable builder release
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="$(gh api --paginate --slurp "repos/$GH_REPO/releases?per_page=100" --jq '
+            [.[][] | select(.draft == false and .prerelease == false)
+              | select(.tag_name | test("^v[0-9]+\\.[0-9]+\\.[0-9]+$"))]
+            | sort_by(.published_at) | last | .tag_name // empty')"
+          if [[ -z "$tag" ]]; then
+            echo 'No published stable builder release exists to preserve.' >&2
+            exit 1
+          fi
+          # --latest=false on runtimes needs an explicitly selected release;
+          # otherwise GitHub can choose a runtime through automatic ordering.
+          gh release edit "$tag" --latest=true
+          [[ "$(gh api "repos/$GH_REPO/releases/latest" --jq .tag_name)" == "$tag" ]]
+          echo "Latest builder release: $tag"
