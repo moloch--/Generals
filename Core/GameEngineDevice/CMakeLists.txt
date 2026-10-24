@@ -196,6 +196,8 @@ set(GAMEENGINEDEVICE_SRC
 if(WIN32)
     # Windows-specific files (use Windows API for filesystem)
     list(APPEND GAMEENGINEDEVICE_SRC
+        # GeneralsX @bugfix Codex 24/10/2026 Share tested dump/report retention with the crash handler.
+        Source/Platform/CrashDumpRetention.cpp
         # GeneralsX @bugfix OpenAI 29/07/2026 Restore the native Windows audio and video implementations.
         Include/MilesAudioDevice/MilesAudioManager.h
         Include/VideoDevice/Bink/BinkVideoPlayer.h
@@ -210,6 +212,11 @@ if(WIN32)
         Source/Win32Device/GameClient/Win32DIKeyboard.cpp
         Source/Win32Device/GameClient/Win32Mouse.cpp
     )
+endif()
+
+# GeneralsX @bugfix Codex 24/10/2026 Keep crash memory queries in the modern Windows platform layer.
+if(WIN32 AND MSVC AND NOT IS_VS6_BUILD)
+    list(APPEND GAMEENGINEDEVICE_SRC Source/Platform/CrashMemoryStatus.cpp)
 endif()
 
 # Add C++ 17 FileSystem implementation for non-VS6 builds
@@ -245,6 +252,10 @@ target_link_libraries(corei_gameenginedevice_private INTERFACE
 target_link_libraries(corei_gameenginedevice_public INTERFACE
     corei_gameengine_public
 )
+
+if(WIN32 AND MSVC AND NOT IS_VS6_BUILD)
+    target_link_libraries(corei_gameenginedevice_public INTERFACE psapi)
+endif()
 
 if(WIN32)
     target_link_libraries(corei_gameenginedevice_public INTERFACE

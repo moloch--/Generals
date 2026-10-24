@@ -118,53 +118,10 @@ void StackDumpFromContext(DWORD eip,DWORD esp,DWORD ebp, void (*callback)(const 
 
 //*****************************************************************************
 //*****************************************************************************
+// GeneralsX @bugfix Codex 24/10/2026 Initialize symbols even when the minidumper already loaded dbghelp.
 BOOL InitSymbolInfo()
 {
-	if (DbgHelpLoader::isLoaded())
-		return TRUE;
-
-	if (DbgHelpLoader::isFailed())
-		return FALSE;
-
-	if (!DbgHelpLoader::load())
-	{
-		atexit(DbgHelpLoader::unload);
-		return FALSE;
-	}
-
-	char pathname[_MAX_PATH+1];
-	char drive[10];
-	char directory[_MAX_PATH+1];
-	HANDLE process;
-
-	DbgHelpLoader::symSetOptions(SYMOPT_DEFERRED_LOADS | SYMOPT_UNDNAME | SYMOPT_LOAD_LINES | SYMOPT_OMAP_FIND_NEAREST);
-
-	process = GetCurrentProcess();
-
-	//Get the apps name
-	::GetModuleFileName(nullptr, pathname, _MAX_PATH);
-
-	// turn it into a search path
-	_splitpath(pathname, drive, directory, nullptr, nullptr);
-	sprintf(pathname, "%s:\\%s", drive, directory);
-
-	// append the current directory to build a search path for SymInit
-	::lstrcat(pathname, ";.;");
-
-	if(DbgHelpLoader::symInitialize(process, pathname, FALSE))
-	{
-		// regenerate the name of the app
-		::GetModuleFileName(nullptr, pathname, _MAX_PATH);
-		if(DbgHelpLoader::symLoadModule(process, nullptr, pathname, nullptr, 0, 0))
-		{
-				//Load any other relevant modules (ie dlls) here
-				atexit(DbgHelpLoader::unload);
-				return TRUE;
-		}
-	}
-
-	DbgHelpLoader::unload();
-	return FALSE;
+	return DbgHelpLoader::initializeCurrentProcessSymbols() ? TRUE : FALSE;
 }
 
 

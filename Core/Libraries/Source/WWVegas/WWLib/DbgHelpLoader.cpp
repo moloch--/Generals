@@ -154,6 +154,52 @@ void DbgHelpLoader::unload()
 	Inst = nullptr;
 }
 
+// GeneralsX @bugfix Codex 24/10/2026 Loading dbghelp for minidumps does not initialize its symbol handler.
+bool DbgHelpLoader::initializeCurrentProcessSymbols()
+{
+	CriticalSectionClass::LockClass lock(CriticalSection);
+	static bool initialized = false;
+	if (initialized)
+		return true;
+
+	if (!load())
+	{
+		unload();
+		return false;
+	}
+
+	char searchPath[MAX_PATH + 4];
+	DWORD length = ::GetModuleFileNameA(nullptr, searchPath, MAX_PATH);
+	if (length == 0 || length >= MAX_PATH)
+	{
+		unload();
+		return false;
+	}
+	char* filename = strrchr(searchPath, '\\');
+	if (filename != nullptr)
+		filename[1] = '\0';
+	else
+		strlcpy(searchPath, ".", ARRAY_SIZE(searchPath));
+	strlcat(searchPath, ";.", ARRAY_SIZE(searchPath));
+
+	symSetOptions(SYMOPT_DEFERRED_LOADS | SYMOPT_UNDNAME | SYMOPT_LOAD_LINES | SYMOPT_OMAP_FIND_NEAREST);
+	if (!symInitialize(::GetCurrentProcess(), searchPath, TRUE))
+	{
+		unload();
+		return false;
+	}
+
+	// Retain our own loader reference when the minidumper or a temporary guard unloads.
+	if (atexit(unload) != 0)
+	{
+		symCleanup(::GetCurrentProcess());
+		unload();
+		return false;
+	}
+	initialized = true;
+	return true;
+}
+
 void DbgHelpLoader::freeResources()
 {
 	// Is private. Needs no locking.
@@ -354,12 +400,21 @@ BOOL DbgHelpLoader::miniDumpWriteDump(
 	PMINIDUMP_USER_STREAM_INFORMATION UserStreamParam,
 	PMINIDUMP_CALLBACK_INFORMATION CallbackParam)
 {
-	CriticalSectionClass::LockClass lock(CriticalSection);
-
-	if (Inst != nullptr && Inst->m_miniDumpWriteDump)
-		return Inst->m_miniDumpWriteDump(hProcess, ProcessId, hFile, DumpType, ExceptionParam, UserStreamParam, CallbackParam);
-
-	return FALSE;
+	// GeneralsX @bugfix Codex 24/10/2026 Preserve the dump failure across lock cleanup and missing entry points.
+	BOOL success = FALSE;
+	DWORD error = ERROR_PROC_NOT_FOUND;
+	{
+		CriticalSectionClass::LockClass lock(CriticalSection);
+		if (Inst != nullptr && Inst->m_miniDumpWriteDump)
+		{
+			success = Inst->m_miniDumpWriteDump(hProcess, ProcessId, hFile, DumpType, ExceptionParam, UserStreamParam, CallbackParam);
+			if (!success)
+				error = ::GetLastError();
+		}
+	}
+	if (!success)
+		::SetLastError(error);
+	return success;
 }
 #endif // RTS_ENABLE_CRASHDUMP
 

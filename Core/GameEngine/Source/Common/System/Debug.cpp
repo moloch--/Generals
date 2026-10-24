@@ -66,6 +66,9 @@
 #include "GameClient/GameText.h"
 #include "GameClient/Keyboard.h"
 #include "GameClient/Mouse.h"
+#if defined(_WIN32) && defined(_MSC_VER) && _MSC_VER >= 1300
+#include "Platform/CrashMemoryStatus.h"
+#endif
 #if defined(DEBUG_STACKTRACE) || defined(IG_DEBUG_STACKTRACE)
 	#include "Common/StackDump.h"
 #endif
@@ -760,6 +763,11 @@ static void TriggerMiniDump()
 void ReleaseCrash(const char *reason)
 {
 	/// do additional reporting on the crash, if possible
+	// GeneralsX @bugfix Codex 24/10/2026 Capture allocation pressure before dump and symbol handling change it.
+#if defined(_WIN32) && defined(_MSC_VER) && _MSC_VER >= 1300
+	CrashMemoryStatus memoryStatus;
+	CaptureCrashMemoryStatus(memoryStatus);
+#endif
 
 	if (!DX8Wrapper_IsWindowed) {
 		if (ApplicationHWnd) {
@@ -799,6 +807,9 @@ void ReleaseCrash(const char *reason)
 	if (theReleaseCrashLogFile)
 	{
 		fprintf(theReleaseCrashLogFile, "Release Crash at %s; Reason %s\n", getCurrentTimeString(), reason);
+#if defined(_WIN32) && defined(_MSC_VER) && _MSC_VER >= 1300
+		WriteCrashMemoryStatus(theReleaseCrashLogFile, memoryStatus);
+#endif
 		fprintf(theReleaseCrashLogFile, "\nLast error:\n%s\n\nCurrent stack:\n", g_LastErrorDump.str());
 		const int STACKTRACE_SIZE	= 12;
 		const int STACKTRACE_SKIP = 6;

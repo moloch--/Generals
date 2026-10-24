@@ -64,15 +64,6 @@ private:
 	Bool InitializeDumpDirectory(const AsciiString& userDirPath);
 	static void KeepNewestFiles(const std::string& directory, const DumpType dumpType, const Int keepCount);
 
-	// Struct to hold file information
-	struct FileInfo
-	{
-		std::string name;
-		FILETIME lastWriteTime;
-	};
-
-	static bool CompareByLastWriteTime(const FileInfo& a, const FileInfo& b);
-
 private:
 	Bool m_miniDumpInitialized;
 	Bool m_loadedDbgHelp;

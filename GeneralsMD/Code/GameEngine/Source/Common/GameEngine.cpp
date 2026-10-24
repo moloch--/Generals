@@ -41,6 +41,7 @@
 #include "Common/GameEngine.h"
 #include "Common/INI.h"
 #include "Common/INIException.h"
+#include "Common/ExceptionDiagnostics.h"
 #include "Common/MessageStream.h"
 #include "Common/ThingFactory.h"
 #include "Common/file.h"
@@ -1056,7 +1057,8 @@ void GameEngine::execute()
 				}
 				catch (...)
 				{
-					// try to save info off
+					// GeneralsX @bugfix Codex 24/10/2026 Preserve the original typed exception if replay cleanup also fails.
+					Bool replayCleanupFailed = FALSE;
 					try
 					{
 						if (TheRecorder && TheRecorder->getMode() == RECORDERMODETYPE_RECORD && TheRecorder->isMultiplayer())
@@ -1064,8 +1066,13 @@ void GameEngine::execute()
 					}
 					catch (...)
 					{
+						replayCleanupFailed = TRUE;
 					}
-					RELEASE_CRASH(("Uncaught Exception in GameEngine::update"));
+					char reason[512];
+					rts::diagnostics::DescribeCurrentException(reason, sizeof(reason), "GameEngine::update");
+					if (replayCleanupFailed)
+						strlcat(reason, " (replay cleanup also failed)", sizeof(reason));
+					RELEASE_CRASH((reason));
 				}
 			}
 

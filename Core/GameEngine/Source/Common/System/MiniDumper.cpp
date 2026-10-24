@@ -20,6 +20,7 @@
 
 #ifdef RTS_ENABLE_CRASHDUMP
 #include "Common/MiniDumper.h"
+#include "Platform/CrashDumpRetention.h"
 #include <wctype.h>
 #include "gitinfo.h"
 
@@ -36,6 +37,22 @@ EXCEPTION_RECORD g_exceptionRecord = { 0 };
 CONTEXT g_exceptionContext = { 0 };
 
 constexpr const char* DumpFileNamePrefix = "Crash";
+
+// GeneralsX @bugfix Codex 24/10/2026 Preserve dump failures in release builds where DEBUG_LOG is disabled.
+static void ReportDumpFailure(const char* dumpPath, const char* operation, DWORD error)
+{
+	char reportPath[MAX_PATH + 5];
+	snprintf(reportPath, ARRAY_SIZE(reportPath), "%s.txt", dumpPath);
+	FILE* report = fopen(reportPath, "w");
+	if (report != nullptr)
+	{
+		fprintf(report, "Crash dump capture failed during %s.\nWindows error: 0x%08lX\nDump file: %s\n",
+			operation, error, dumpPath);
+		fclose(report);
+	}
+
+	fprintf(stderr, "Crash dump capture failed during %s: 0x%08lX (%s)\n", operation, error, dumpPath);
+}
 
 void MiniDumper::initMiniDumper(const AsciiString& userDirPath)
 {
@@ -362,7 +379,7 @@ void MiniDumper::CreateMiniDump(DumpType dumpType)
 	HANDLE dumpFile = ::CreateFile(m_dumpFile, GENERIC_READ | GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
 	if (dumpFile == nullptr || dumpFile == INVALID_HANDLE_VALUE)
 	{
-		DEBUG_LOG(("MiniDumper::CreateMiniDump: Unable to create dump file '%s': error=%u", m_dumpFile, ::GetLastError()));
+		ReportDumpFailure(m_dumpFile, "CreateFile", ::GetLastError());
 		return;
 	}
 
@@ -400,7 +417,7 @@ void MiniDumper::CreateMiniDump(DumpType dumpType)
 
 	if (!success)
 	{
-		DEBUG_LOG(("MiniDumper::CreateMiniDump: Unable to write minidump file '%s': error=%u", m_dumpFile, ::GetLastError()));
+		ReportDumpFailure(m_dumpFile, "MiniDumpWriteDump", ::GetLastError());
 	}
 	else
 	{
@@ -410,61 +427,10 @@ void MiniDumper::CreateMiniDump(DumpType dumpType)
 	::CloseHandle(dumpFile);
 }
 
-// Comparator for sorting files by last modified time (newest first)
-bool MiniDumper::CompareByLastWriteTime(const FileInfo& a, const FileInfo& b)
-{
-	return ::CompareFileTime(&a.lastWriteTime, &b.lastWriteTime) > 0;
-}
-
 void MiniDumper::KeepNewestFiles(const std::string& directory, const DumpType dumpType, const Int keepCount)
 {
-	// directory already contains trailing backslash
-	std::string searchPath = directory + DumpFileNamePrefix + static_cast<Char>(dumpType) + "*";
-	WIN32_FIND_DATA findData;
-	HANDLE hFind = ::FindFirstFile(searchPath.c_str(), &findData);
-
-	if (hFind == INVALID_HANDLE_VALUE)
-	{
-		if (::GetLastError() != ERROR_FILE_NOT_FOUND)
-		{
-			DEBUG_LOG(("MiniDumper::KeepNewestFiles: Unable to find files in directory '%s': error=%u", searchPath.c_str(), ::GetLastError()));
-		}
-
-		return;
-	}
-
-	std::vector<FileInfo> files;
-	do
-	{
-		if (findData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
-		{
-			continue;
-		}
-
-		// Store file info
-		FileInfo fileInfo;
-		fileInfo.name = directory + findData.cFileName;
-		fileInfo.lastWriteTime = findData.ftLastWriteTime;
-		files.push_back(fileInfo);
-
-	} while (::FindNextFile(hFind, &findData));
-
-	::FindClose(hFind);
-
-	// Sort files by last modified time in descending order
-	std::sort(files.begin(), files.end(), CompareByLastWriteTime);
-
-	// Delete files beyond the newest keepCount
-	for (size_t i = keepCount; i < files.size(); ++i)
-	{
-		if (::DeleteFile(files[i].name.c_str()))
-		{
-			DEBUG_LOG(("MiniDumper::KeepNewestFiles: Deleted old dump file '%s'.", files[i].name.c_str()));
-		}
-		else
-		{
-			DEBUG_LOG(("MiniDumper::KeepNewestFiles: Failed to delete file '%s': error=%u", files[i].name.c_str(), ::GetLastError()));
-		}
-	}
+	// GeneralsX @bugfix Codex 24/10/2026 Count paired files once and bound standalone capture-failure reports.
+	if (keepCount >= 0)
+		KeepNewestCrashCaptures(directory.c_str(), static_cast<Char>(dumpType), static_cast<size_t>(keepCount));
 }
 #endif

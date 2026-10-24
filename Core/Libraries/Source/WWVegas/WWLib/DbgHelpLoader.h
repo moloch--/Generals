@@ -62,6 +62,9 @@ public:
 	static bool load();
 	static void unload();
 
+	// GeneralsX @bugfix Codex 24/10/2026 Keep a symbol session alive independently of crash-dump DLL users.
+	static bool initializeCurrentProcessSymbols();
+
 	static BOOL WINAPI symInitialize(
 		HANDLE hProcess,
 		LPSTR UserSearchPath,

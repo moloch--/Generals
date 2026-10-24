@@ -42,7 +42,9 @@ project(genzh LANGUAGES C CXX)
 
 # GeneralsX @build Codex 01/08/2026 Keep focused Online protocol tests opt-in for normal game builds.
 option(RTS_BUILD_ONLINE_TESTS "Build focused Online endpoint and relay-state tests" OFF)
-if(RTS_BUILD_ONLINE_TESTS)
+# GeneralsX @build Codex 24/10/2026 Exercise Windows crash capture without launching the game.
+option(RTS_BUILD_DIAGNOSTICS_TESTS "Build focused crash diagnostics tests" OFF)
+if(RTS_BUILD_ONLINE_TESTS OR RTS_BUILD_DIAGNOSTICS_TESTS)
     enable_testing()
 endif()
 

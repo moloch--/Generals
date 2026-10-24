@@ -1171,6 +1171,52 @@ if(NOT IS_VS6_BUILD)
     )
 endif()
 
+# GeneralsX @build Codex 24/10/2026 Test portable exception reporting without a game runtime.
+if(RTS_BUILD_DIAGNOSTICS_TESTS AND NOT IS_VS6_BUILD)
+    add_executable(generalsx_exception_diagnostics_tests Tests/Diagnostics/ExceptionDiagnosticsTest.cpp)
+    target_include_directories(generalsx_exception_diagnostics_tests PRIVATE Include)
+    target_compile_features(generalsx_exception_diagnostics_tests PRIVATE cxx_std_20)
+    target_link_libraries(generalsx_exception_diagnostics_tests PRIVATE corei_always)
+    add_test(NAME generalsx_exception_diagnostics_tests COMMAND generalsx_exception_diagnostics_tests)
+endif()
+
+# GeneralsX @build Codex 24/10/2026 Check crash-time memory telemetry against real Windows virtual allocations.
+if(RTS_BUILD_DIAGNOSTICS_TESTS AND WIN32 AND MSVC AND NOT IS_VS6_BUILD)
+    add_executable(generalsx_crash_memory_tests
+        Tests/Diagnostics/CrashMemoryStatusTest.cpp
+        ../GameEngineDevice/Source/Platform/CrashMemoryStatus.cpp
+    )
+    target_include_directories(generalsx_crash_memory_tests PRIVATE ../GameEngineDevice/Include)
+    target_compile_features(generalsx_crash_memory_tests PRIVATE cxx_std_20)
+    target_link_libraries(generalsx_crash_memory_tests PRIVATE corei_always psapi)
+    add_test(NAME generalsx_crash_memory_tests COMMAND generalsx_crash_memory_tests)
+
+    add_executable(generalsx_crash_dump_retention_tests
+        Tests/Diagnostics/CrashDumpRetentionTest.cpp
+        ../GameEngineDevice/Source/Platform/CrashDumpRetention.cpp
+    )
+    target_include_directories(generalsx_crash_dump_retention_tests PRIVATE ../GameEngineDevice/Include)
+    target_compile_features(generalsx_crash_dump_retention_tests PRIVATE cxx_std_20)
+    target_link_libraries(generalsx_crash_dump_retention_tests PRIVATE corei_always)
+    add_test(NAME generalsx_crash_dump_retention_tests COMMAND generalsx_crash_dump_retention_tests)
+endif()
+
+# GeneralsX @build Codex 24/10/2026 Verify the real x86 DbgHelp wrapper and exception dump contents.
+if(RTS_BUILD_DIAGNOSTICS_TESTS AND WIN32 AND MSVC AND NOT IS_VS6_BUILD AND CMAKE_SIZEOF_VOID_P EQUAL 4 AND RTS_CRASHDUMP_ENABLE)
+    add_executable(generalsx_windows_diagnostics_tests
+        Tests/Diagnostics/WindowsDiagnosticsTest.cpp
+    )
+    target_compile_definitions(generalsx_windows_diagnostics_tests PRIVATE DISABLE_GAMEMEMORY=1)
+    target_compile_features(generalsx_windows_diagnostics_tests PRIVATE cxx_std_20)
+    target_link_libraries(generalsx_windows_diagnostics_tests PRIVATE
+        core_wwlib
+        corei_always
+        corei_libraries_source_wwvegas
+    )
+    add_test(NAME generalsx_windows_diagnostics_tests COMMAND generalsx_windows_diagnostics_tests)
+    set_tests_properties(generalsx_windows_diagnostics_tests PROPERTIES TIMEOUT 30)
+endif()
+
 if(RTS_GAMEMEMORY_ENABLE)
     # Uses the original Game Memory implementation.
     list(APPEND GAMEENGINE_SRC

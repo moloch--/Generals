@@ -34,6 +34,7 @@
 #define WIN32_LEAN_AND_MEAN  // only bare bones windows stuff wanted
 #include <windows.h>
 #include <stdlib.h>
+#include <stdio.h>
 #include <crtdbg.h>
 #include <eh.h>
 #include <ole2.h>
@@ -930,7 +931,11 @@ Int APIENTRY WinMain( HINSTANCE hInstance, HINSTANCE hPrevInstance,
 	}
 	catch (...)
 	{
-
+		// GeneralsX @bugfix Codex 24/10/2026 Report uncaught startup/replay/shutdown failures and never return success.
+		// GameMain may already have returned zero when shutdown raises an exception.
+		exitcode = EXIT_FAILURE;
+		fprintf(stderr, "[GeneralsX] Uncaught exception in WinMain; exiting with failure.\n");
+		fflush(stderr);
 	}
 
 #ifdef RTS_ENABLE_CRASHDUMP
